@@ -1,26 +1,28 @@
 name: AI Quant Bot v12.3
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '*/15 * * * *'
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
-      - name: Set Environment Variables
+
+      - name: Set Environment Variables (From GitHub Variables)
         run: |
           echo "TELEGRAM_TOKEN=${{ vars.TELEGRAM_TOKEN }}" >> $GITHUB_ENV
           echo "TELEGRAM_CHAT=${{ vars.TELEGRAM_CHAT }}" >> $GITHUB_ENV
           echo "ENCRYPTION_KEY=${{ vars.ENCRYPTION_KEY }}" >> $GITHUB_ENV
+
       - name: Install dependencies
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
+
       - name: Run bot (one cycle)
         run: python main.py
