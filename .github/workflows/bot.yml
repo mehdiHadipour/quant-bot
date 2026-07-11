@@ -4,6 +4,10 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+      TELEGRAM_CHAT: ${{ secrets.TELEGRAM_CHAT }}
+      ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
@@ -11,15 +15,6 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
-      - name: Set Environment Variables
-        run: |
-          echo "TELEGRAM_TOKEN=${{ vars.TELEGRAM_TOKEN }}" >> $GITHUB_ENV
-          echo "TELEGRAM_CHAT=${{ vars.TELEGRAM_CHAT }}" >> $GITHUB_ENV
-          echo "ENCRYPTION_KEY=${{ vars.ENCRYPTION_KEY }}" >> $GITHUB_ENV
-        env:
-          TELEGRAM_TOKEN: ${{ vars.TELEGRAM_TOKEN }}
-          TELEGRAM_CHAT: ${{ vars.TELEGRAM_CHAT }}
-          ENCRYPTION_KEY: ${{ vars.ENCRYPTION_KEY }}
       - name: Install dependencies
         run: |
           pip install --upgrade pip
