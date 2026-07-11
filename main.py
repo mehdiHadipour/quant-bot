@@ -34,9 +34,6 @@ def process_symbol(state, symbol):
     df_1h = fetch_klines(symbol, "1h")
     df_4h = fetch_klines(symbol, "4h")
 
-    # NOTE: df_1h / df_4h are pandas DataFrames or None.
-    # Never use `not df` on a DataFrame — its truth value is ambiguous
-    # and raises a ValueError. Always compare explicitly to None.
     if df_1h is None or df_4h is None or df_1h.empty or df_4h.empty:
         print(f"⚠️ Skipping {symbol}: no market data available.")
         return
@@ -56,8 +53,6 @@ def process_symbol(state, symbol):
                 f"خروج: {trade['exit_price']:,.2f}"
             )
         save_state(state)
-        # A trade just closed this cycle; wait for the next cycle before
-        # opening a new one on the same symbol.
         return
 
     result = analyze_market(df_1h, df_4h, symbol)
@@ -98,6 +93,10 @@ def process_symbol(state, symbol):
 
 def main():
     print(f"🚀 Starting cycle - {datetime.now(timezone.utc).isoformat()}")
+    
+    # 1. ارسال پیام تست هنگام اولین اجرا برای اطمینان از اتصال تلگرام
+    send_telegram_alert("✅ ربات معاملاتی شما با موفقیت راه‌اندازی شد و در حال آماده‌به‌کار است!")
+
     state = load_state()
 
     if state.get("circuit_breaker"):
@@ -115,7 +114,6 @@ def main():
         try:
             process_symbol(state, symbol)
         except Exception as e:
-            # One bad symbol should never take down the whole cycle.
             print(f"❌ Error processing {symbol}: {e}")
 
     print("✅ Cycle completed.")
