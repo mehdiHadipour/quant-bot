@@ -1,6 +1,7 @@
 import os
+import sys
 from dotenv import load_dotenv
-from cryptography.fernet import Fernet
+from logger import log
 
 load_dotenv()
 
@@ -8,20 +9,79 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT = os.getenv("TELEGRAM_CHAT")
 ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY")
 
-# اگر کلید موجود نبود یا نامعتبر بود، خودکار یک کلید جدید و استاندارد بساز
-try:
-    if not ENCRYPTION_KEY:
-        ENCRYPTION_KEY = Fernet.generate_key().decode()
-        print("⚠️ ENCRYPTION_KEY پیدا نشد. یک کلید جدید ساخته شد.")
-    else:
-        # چک کردن اینکه آیا کلید وارد شده فرمت درستی دارد یا نه
-        Fernet(ENCRYPTION_KEY.encode())
-except Exception:
-    ENCRYPTION_KEY = Fernet.generate_key().decode()
-    print("⚠️ ENCRYPTION_KEY نامعتبر بود. یک کلید جدید و استاندارد ساخته شد.")
+_missing = [
+    name for name, value in [
+        ("TELEGRAM_TOKEN", TELEGRAM_TOKEN),
+        ("TELEGRAM_CHAT", TELEGRAM_CHAT),
+        ("ENCRYPTION_KEY", ENCRYPTION_KEY),
+    ] if not value
+]
 
-if not TELEGRAM_TOKEN or not TELEGRAM_CHAT:
-    print("⚠️ هشدار: تنظیمات تلگرام کامل نیست. پیام‌ها ارسال نمی‌شوند.")
+if _missing:
+    print(
+        "❌ خطا: متغیرهای محیطی زیر تنظیم نشده‌اند: "
+        + ", ".join(_missing)
+        + "\nاین مقادیر باید در GitHub Secrets (Settings > Secrets and variables > Actions) "
+        "تنظیم شوند و هرگز نباید داخل کد نوشته شوند.\n"
+        "⚠️ توجه: اگر ENCRYPTION_KEY نامعتبر باشد، ربات هرگز نباید خودش یک کلید تصادفی "
+        "جایگزین بسازد؛ چون در آن صورت state رمزنگاری‌شدهٔ اجرای قبلی برای همیشه غیرقابل "
+        "بازیابی می‌شود. به همین دلیل این‌جا صریحاً متوقف می‌شویم تا مشکل واقعی دیده و رفع شود.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
 
-# لیست ارزهای قابل تحلیل
-SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+
+def _float_env(name, default):
+    """Read a numeric setting from a GitHub Secret/Variable, falling back to
+    a safe default and warning (not crashing) on a bad value."""
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        log.warning(f"مقدار {name}='{raw}' نامعتبر بود؛ مقدار پیش‌فرض {default} استفاده شد.")
+        return default
+
+
+def _str_env(name, default):
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    return raw
+
+
+# نمادهای معاملاتی که ربات هر چرخه تحلیل می‌کند.
+# برای شخصی‌سازی، یک Secret/Variable با نام SYMBOLS بسازید (مثال: "BTCUSDT,ETHUSDT").
+SYMBOLS = [
+    s.strip()
+    for s in _str_env(
+        "SYMBOLS",
+        "BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT,XRPUSDT,ADAUSDT,DOGEUSDT,AVAXUSDT,LINKUSDT,DOTUSDT",
+    ).split(",")
+    if s.strip()
+]
+
+# === تنظیمات v19.0 Ultra Confluence ===
+# حداقل درصد احتمال (0-100) که یک سیگنال باید داشته باشد تا "قوی" در نظر گرفته و ارسال شود.
+MIN_SIGNAL_PROBABILITY = _float_env("MIN_SIGNAL_PROBABILITY", 70.0)
+
+# حداقل مقدار ADX (قدرت روند). زیر این مقدار بازار "رنج/بدون روند" در نظر گرفته می‌شود و
+# هیچ سیگنالی صادر نمی‌شود، حتی اگر بقیهٔ شرایط برقرار باشند.
+MIN_ADX = _float_env("MIN_ADX", 25.0)
+
+# ضرایب ATR برای محاسبهٔ حد ضرر (SL) و حد سود (TP).
+ATR_SL_MULTIPLIER = _float_env("ATR_SL_MULTIPLIER", 1.8)
+ATR_TP_MULTIPLIER = _float_env("ATR_TP_MULTIPLIER", 3.0)
+
+# درصد پیشنهادی از سرمایه که در هر معامله به ریسک گذاشته شود (فقط برای نمایش راهنما در
+# پیام تلگرام استفاده می‌شود؛ ربات خودش مبلغی معامله نمی‌کند).
+RISK_PERCENT_PER_TRADE = _float_env("RISK_PERCENT_PER_TRADE", 1.0)
+
+# وقتی قیمت این‌قدر از فاصلهٔ کل بین ورود و SL را طی کرده باشد (مثلاً 0.8 یعنی ۸۰٪ راه
+# تا حد ضرر)، یک هشدار یک‌باره در تلگرام ارسال می‌شود تا قبل از خوردن SL مطلع شوید.
+SL_WARNING_THRESHOLD = _float_env("SL_WARNING_THRESHOLD", 0.8)
+
+# بعد از اینکه یک معامله با ضرر (LOSS) بسته شد، ربات به‌مدت این تعداد چرخه (هر چرخه ۱۵
+# دقیقه) دیگر سیگنال جدیدی روی همان نماد باز نمی‌کند. برای غیرفعال‌کردن، مقدار 0 بگذارید.
+SYMBOL_COOLDOWN_CYCLES = int(_float_env("SYMBOL_COOLDOWN_CYCLES", 6))
