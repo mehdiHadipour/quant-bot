@@ -1,7 +1,9 @@
 import json
 import os
+import shutil
 from cryptography.fernet import Fernet, InvalidToken
 from config import ENCRYPTION_KEY
+from logger import log
 
 try:
     fernet = Fernet(ENCRYPTION_KEY.encode())
@@ -13,6 +15,7 @@ except Exception as e:
     )
 
 STATE_PATH = "state/state.json.enc"
+BACKUP_PATH = "state/state.json.enc.bak"
 HISTORY_PATH = "data/history.csv"
 
 # Ensure directories exist
@@ -21,7 +24,16 @@ os.makedirs("data", exist_ok=True)
 
 DEFAULT_STATE = {
     "trades": [],
-    "stats": {"wins": 0, "losses": 0, "streak": 0},
+    "stats": {
+        "wins": 0,
+        "losses": 0,
+        "streak": 0,
+        "equity_r": 0.0,
+        "peak_equity_r": 0.0,
+        "max_drawdown_r": 0.0,
+        "gross_profit_r": 0.0,
+        "gross_loss_r": 0.0,
+    },
     "circuit_breaker": None,
 }
 
@@ -33,28 +45,65 @@ def _with_defaults(state):
     state["stats"].setdefault("wins", 0)
     state["stats"].setdefault("losses", 0)
     state["stats"].setdefault("streak", 0)
+    state["stats"].setdefault("equity_r", 0.0)
+    state["stats"].setdefault("peak_equity_r", 0.0)
+    state["stats"].setdefault("max_drawdown_r", 0.0)
+    state["stats"].setdefault("gross_profit_r", 0.0)
+    state["stats"].setdefault("gross_loss_r", 0.0)
     state.setdefault("circuit_breaker", None)
+    state.setdefault("last_report_date", None)
+    state.setdefault("symbol_cooldowns", {})
+    state.setdefault("consecutive_fetch_failures", 0)
+    state.setdefault("fetch_failure_alert_sent", False)
     return state
+
+
+def _decrypt_file(path):
+    """Read and decrypt a state file. Raises on any failure so the caller
+    can decide how to react (try the backup, or fall back to defaults)."""
+    with open(path, "rb") as f:
+        encrypted_data = f.read()
+    if not encrypted_data:
+        raise ValueError("empty file")
+    return json.loads(fernet.decrypt(encrypted_data).decode())
 
 
 def load_state():
     if os.path.exists(STATE_PATH):
         try:
-            with open(STATE_PATH, "rb") as f:
-                encrypted_data = f.read()
-                if encrypted_data:
-                    return _with_defaults(json.loads(fernet.decrypt(encrypted_data).decode()))
+            return _with_defaults(_decrypt_file(STATE_PATH))
         except InvalidToken:
-            print("⚠️ خطا: فایل state با ENCRYPTION_KEY فعلی قابل رمزگشایی نیست (کلید عوض شده؟). با state پیش‌فرض شروع می‌شود.")
+            log.warning("فایل state با ENCRYPTION_KEY فعلی قابل رمزگشایی نیست (کلید عوض شده؟).")
         except Exception as e:
-            print(f"⚠️ Error loading state: {e}")
+            log.warning(f"فایل state اصلی خراب/غیرقابل‌خواندن بود: {e}")
+
+        # Primary file exists but couldn't be used — try the backup before
+        # giving up and starting from a blank state.
+        if os.path.exists(BACKUP_PATH):
+            try:
+                state = _with_defaults(_decrypt_file(BACKUP_PATH))
+                log.warning("state از نسخهٔ backup (state.json.enc.bak) بازیابی شد؛ ممکن است چند دقیقه قدیمی‌تر باشد.")
+                return state
+            except Exception as e:
+                log.error(f"نسخهٔ backup هم قابل استفاده نبود: {e}")
+
     return _with_defaults(json.loads(json.dumps(DEFAULT_STATE)))
 
 
 def save_state(state):
     try:
+        new_bytes = fernet.encrypt(json.dumps(state).encode())
+
+        # Keep the previous known-good file as a backup before overwriting,
+        # so a corrupted/interrupted write never loses everything.
+        if os.path.exists(STATE_PATH):
+            try:
+                shutil.copyfile(STATE_PATH, BACKUP_PATH)
+            except Exception as e:
+                log.warning(f"گرفتن نسخهٔ backup از state ناموفق بود (ادامه می‌دهیم): {e}")
+
         with open(STATE_PATH, "wb") as f:
-            f.write(fernet.encrypt(json.dumps(state).encode()))
-        print("✅ State saved successfully.")
+            f.write(new_bytes)
+        log.info("State saved successfully.")
     except Exception as e:
-        print(f"❌ Error saving state: {e}")
+        log.error(f"Error saving state: {e}")
