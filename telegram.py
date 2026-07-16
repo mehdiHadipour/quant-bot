@@ -1,5 +1,6 @@
 import requests
 from config import TELEGRAM_TOKEN, TELEGRAM_CHAT
+from logger import log
 
 TELEGRAM_MAX_LEN = 4096
 
@@ -19,9 +20,9 @@ def send_telegram_alert(message):
                 timeout=10,
             )
             if resp.status_code == 200:
-                print("✅ Telegram alert sent.")
+                log.info("Telegram alert sent.")
                 return
-            print(f"⚠️ Telegram API returned {resp.status_code}: {resp.text[:200]}")
+            log.warning(f"Telegram API returned {resp.status_code}: {resp.text[:200]}")
         except requests.RequestException as e:
-            print(f"⚠️ Failed to send Telegram alert (attempt {attempt + 1}/3): {e}")
-    print("❌ Giving up on sending Telegram alert after 3 attempts.")
+            log.warning(f"Failed to send Telegram alert (attempt {attempt + 1}/3): {e}")
+    log.error("Giving up on sending Telegram alert after 3 attempts.")
