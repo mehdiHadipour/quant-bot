@@ -2,6 +2,8 @@ import requests
 import pandas as pd
 import time
 
+from logger import log
+
 # GitHub Actions runners are hosted in US datacenters, and api.binance.com
 # sometimes returns HTTP 451 (geo-blocked) from those IPs. data-api.binance.vision
 # is Binance's official unauthenticated market-data mirror and is not subject to
@@ -18,6 +20,11 @@ HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; AIQuantBot/1.0)"}
 
 
 def fetch_klines(symbol, interval="1h", limit=300):
+    # Fetches now run concurrently across symbols (see main.fetch_all_klines),
+    # so every log line is tagged with "symbol interval" — otherwise
+    # interleaved output from parallel threads would be unreadable,
+    # especially on a small mobile screen viewing the Actions log.
+    tag = f"{symbol} {interval}"
     params = {"symbol": symbol, "interval": interval, "limit": limit}
 
     for base_url in BASE_URLS:
@@ -35,18 +42,18 @@ def fetch_klines(symbol, interval="1h", limit=300):
                         } for x in data])
                 elif resp.status_code in (403, 418, 429):
                     # Rate limited / banned on this host — back off then try next host.
-                    print(f"⚠️ {base_url} returned {resp.status_code}, backing off...")
+                    log.warning(f"[{tag}] {base_url} returned {resp.status_code}, backing off...")
                     time.sleep(2)
                 elif resp.status_code == 451:
                     # Geo-blocked on this host, no point retrying it — jump to next host.
-                    print(f"⚠️ {base_url} returned 451 (geo-blocked), trying next endpoint...")
+                    log.warning(f"[{tag}] {base_url} returned 451 (geo-blocked), trying next endpoint...")
                     break
                 else:
-                    print(f"⚠️ {base_url} returned status {resp.status_code}")
+                    log.warning(f"[{tag}] {base_url} returned status {resp.status_code}")
                     time.sleep(1)
             except requests.RequestException as e:
-                print(f"⚠️ Request error on {base_url} (attempt {attempt + 1}/3): {e}")
+                log.warning(f"[{tag}] Request error on {base_url} (attempt {attempt + 1}/3): {e}")
                 time.sleep(1)
 
-    print(f"❌ Failed to fetch data for {symbol} from all endpoints")
+    log.error(f"[{tag}] Failed to fetch data from all endpoints")
     return None
