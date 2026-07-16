@@ -1,7 +1,10 @@
-name: AI Quant Bot - Trading Cycle
+name: AI Quant Bot v19.0 - Trading Cycle
 
 on:
   schedule:
+    # Every 15 minutes. This alone already covers the 4h check that used
+    # to be a second, overlapping cron entry (two crons firing at once on
+    # the hour marks was causing duplicate concurrent runs).
     - cron: "*/15 * * * *"
   workflow_dispatch: {}
 
@@ -32,18 +35,51 @@ jobs:
       - name: Ensure state/data directories exist
         run: mkdir -p state data
 
+      # Fast static-analysis pass (unused imports, undefined names, obvious
+      # bugs). Deliberately just `ruff check`, not `black` — black only
+      # reformats style with no bug-catching value, and would create noisy
+      # diffs on a mobile-edited repo for no functional benefit. Also
+      # non-blocking, for the same reason the test step is (see below).
+      - name: Lint (ruff)
+        continue-on-error: true
+        run: |
+          pip install ruff --quiet
+          ruff check .
+
+      # Runs the tests/ suite before touching real trading logic. Deliberately
+      # non-blocking (continue-on-error): this bot is checked on periodically
+      # from a phone, and a flaky/environmental test failure silently halting
+      # the whole trading cycle for days would be worse than a visible warning
+      # in the Actions log. Treat a red "Run tests" step as "go take a look",
+      # not as "the bot is definitely broken".
+      - name: Run tests
+        continue-on-error: true
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT: ${{ secrets.TELEGRAM_CHAT }}
+          ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
+        run: python -m unittest discover -s tests -t . -v
+
       - name: Run Quant Engine
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT: ${{ secrets.TELEGRAM_CHAT }}
           ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
+          SYMBOLS: ${{ vars.SYMBOLS }}
+          MIN_SIGNAL_PROBABILITY: ${{ vars.MIN_SIGNAL_PROBABILITY }}
+          MIN_ADX: ${{ vars.MIN_ADX }}
+          ATR_SL_MULTIPLIER: ${{ vars.ATR_SL_MULTIPLIER }}
+          ATR_TP_MULTIPLIER: ${{ vars.ATR_TP_MULTIPLIER }}
+          RISK_PERCENT_PER_TRADE: ${{ vars.RISK_PERCENT_PER_TRADE }}
+          SL_WARNING_THRESHOLD: ${{ vars.SL_WARNING_THRESHOLD }}
+          SYMBOL_COOLDOWN_CYCLES: ${{ vars.SYMBOL_COOLDOWN_CYCLES }}
         run: python main.py
 
       - name: Save state & history to repository
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add state/state.json.enc data/history.csv 2>/dev/null || true
+          git add state/state.json.enc state/state.json.enc.bak data/history.csv 2>/dev/null || true
           if ! git diff --cached --quiet; then
             git commit -m "chore: auto-update bot state & history [skip ci]"
             git push
