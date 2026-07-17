@@ -1,0 +1,2 @@
+symbol,direction,entry,tp,sl,status,sl_warning_sent,time,result,exit_price,exit_time,r_multiple
+AVAXUSDT,SELL,6.453,6.300754983968596,6.544347009618843,closed,True,2026-07-17T15:00:13.156139+00:00,LOSS,6.587,2026-07-17T18:39:43.261218+00:00,-1.466933625513657
