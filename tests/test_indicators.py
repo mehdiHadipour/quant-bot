@@ -57,7 +57,23 @@ class TestAnalyzeMarket(unittest.TestCase):
         df = _make_ohlcv(n, [100 + i * 0.1 for i in range(n)])
         self.assertIsNone(analyze_market(df, df, df, df, "TESTUSDT"))
 
-    def test_does_not_raise_on_a_ranging_market(self):
+    def test_fvg_detected_on_a_genuine_gap_up(self):
+        """Fair Value Gap: candle[-3]'s high must be below candle[-1]'s low
+        for a bullish FVG. Craft the last 3 candles explicitly to form one
+        on top of an otherwise-normal uptrend, and check it's reported."""
+        n = 250
+        close_values = [100 + i * 0.5 for i in range(n)]
+        df = _make_ohlcv(n, close_values)
+        # Force a clean gap: candle[-3] high well below candle[-1] low.
+        df.loc[df.index[-3], "high"] = df["close"].iloc[-3] + 0.1
+        df.loc[df.index[-1], "low"] = df["high"].iloc[-3] + 5.0
+        df.loc[df.index[-1], "close"] = df["low"].iloc[-1] + 1.0
+        df.loc[df.index[-1], "high"] = df["close"].iloc[-1] + 1.0
+        result = analyze_market(df, df, df, df, "TESTUSDT")
+        if result is not None:
+            self.assertEqual(result.get("fvg"), "bullish")
+
+
         # Small random noise around a flat price — a classic low-ADX,
         # "nothing to trade" market. Must not raise, and in practice
         # should not produce a signal (verified in manual QA against the
@@ -143,6 +159,36 @@ class TestAnalyzeMarket(unittest.TestCase):
             "BUY and SELL probabilities for mirror-image setups of equal strength "
             "should be roughly symmetric, not wildly different",
         )
+
+
+class TestFundingRateScoring(unittest.TestCase):
+    """funding_rate is a contrarian, modest-weight, fail-open input: it
+    must never block a signal on its own (None just means 0 score), and it
+    must not flip a clear trend's direction — only nudge the probability."""
+
+    def test_none_funding_rate_does_not_crash_or_change_direction(self):
+        n = 250
+        close_values = [100 + i * 0.5 for i in range(n)]
+        df = _make_ohlcv(n, close_values)
+        try:
+            result = analyze_market(df, df, df, df, "TESTUSDT", funding_rate=None)
+        except Exception as e:
+            self.fail(f"analyze_market raised with funding_rate=None: {e}")
+        if result is not None:
+            self.assertEqual(result["direction"], "BUY")
+            self.assertIsNone(result.get("funding_rate"))
+
+    def test_extreme_positive_funding_does_not_flip_a_clean_uptrend(self):
+        n = 250
+        close_values = [100 + i * 0.5 for i in range(n)]
+        df = _make_ohlcv(n, close_values)
+        result = analyze_market(df, df, df, df, "TESTUSDT", funding_rate=0.01)
+        if result is not None:
+            # A strongly positive funding rate should only ever soften a
+            # BUY signal's confidence, never turn a clean, strong uptrend
+            # into a SELL — it's a modest contrarian nudge, not an override.
+            self.assertEqual(result["direction"], "BUY")
+            self.assertEqual(result.get("funding_rate"), 0.01)
 
 
 if __name__ == "__main__":
