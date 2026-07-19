@@ -1,4 +1,4 @@
-name: AI Quant Bot v23.0 - Trading Cycle
+name: AI Quant Bot v25.0 - Trading Cycle
 
 on:
   schedule:
@@ -80,6 +80,7 @@ jobs:
           SYMBOL_COOLDOWN_CYCLES: ${{ vars.SYMBOL_COOLDOWN_CYCLES }}
           CYCLE_MINUTES: ${{ vars.CYCLE_MINUTES }}
           TRAILING_TRIGGER_R: ${{ vars.TRAILING_TRIGGER_R }}
+          MAX_CONCURRENT_TRADES: ${{ vars.MAX_CONCURRENT_TRADES }}
         run: python main.py
 
       - name: Save state & history to repository
