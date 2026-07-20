@@ -76,6 +76,20 @@ def fetch_klines(symbol, interval="1h", limit=300):
 # currently is to be long vs. short via perpetual futures on that symbol.
 # It's a genuine, widely-used positioning/sentiment signal — not a
 # fabricated data source — and costs nothing extra to fetch.
+#
+# IMPORTANT CAVEAT: unlike spot market data (which has the
+# data-api.binance.vision unblocked mirror used above), Binance's
+# derivatives/futures API (fapi.binance.com) does not have a documented,
+# free, unblocked mirror. Regulatory geo-restrictions on leveraged
+# derivatives trading tend to be stricter than on spot, and in practice
+# this endpoint returns HTTP 451 from GitHub Actions' US-based runner
+# IPs consistently, not just occasionally. The feature is written to
+# fail open (funding_score stays 0, never blocks a signal) specifically
+# because of this — but logging a full WARNING for every one of the 10
+# symbols on every single 5-minute cycle would be ~2,900 near-identical
+# noise lines a day for a structural, not transient, limitation. So this
+# only logs once (DEBUG-level, off by default) and the caller in main.py
+# reports one aggregated line per cycle instead of per symbol.
 FUNDING_URL = "https://fapi.binance.com/fapi/v1/premiumIndex"
 
 
@@ -95,7 +109,7 @@ def fetch_funding_rate(symbol):
             if rate is not None:
                 return float(rate)
         else:
-            log.warning(f"[{symbol}] funding rate fetch returned {resp.status_code}")
+            log.debug(f"[{symbol}] funding rate fetch returned {resp.status_code}")
     except (requests.RequestException, ValueError, TypeError) as e:
-        log.warning(f"[{symbol}] funding rate fetch failed: {e}")
+        log.debug(f"[{symbol}] funding rate fetch failed: {e}")
     return None
