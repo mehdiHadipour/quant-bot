@@ -1,0 +1,2 @@
+symbol,direction,entry,tp,sl,status,sl_warning_sent,sl_moved_to_breakeven,time,result,exit_price,exit_time,r_multiple
+DOTUSDT,SELL,0.816,0.7979155120569105,0.816,closed,False,True,2026-07-19T20:27:54.825432+00:00,LOSS,0.816,2026-07-20T16:14:32.477074+00:00,0.0
