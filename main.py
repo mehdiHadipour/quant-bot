@@ -1,27 +1,29 @@
 #!/usr/bin/env python3
 """
-🚀 AI Quant Bot v25.0 - Funding Rate + Portfolio Risk Cap Edition
-Adds two free, no-new-cost improvements:
-  1. Funding rate (Binance USDT-M futures, public/free): a modest,
-     contrarian scoring input — crowded/expensive long or short
-     positioning nudges probability the other way. Fails open (never
-     blocks a signal) if the endpoint is unreachable.
-  2. MAX_CONCURRENT_TRADES: a portfolio-wide cap on simultaneously open
-     trades across all symbols, since several of the 10 symbols tend to
-     move together — prevents several correlated signals from opening in
-     the same cycle and quietly multiplying the same risk.
-Also hardens state persistence: save_state() now writes to a temp file and
-atomically renames it into place, so a mid-write kill (Actions timeout/
-cancel) can never leave a half-written, corrupted state file.
+🚀 AI Quant Bot v25.1 - Funding Rate Log-Noise Fix
+Fixes: fetch_funding_rate() was logging a full WARNING for every one of
+the 10 symbols on every 5-minute cycle when Binance's futures API
+(fapi.binance.com) is geo-blocked from GitHub Actions' US-based runner
+IPs — which happens consistently, not occasionally, since derivatives
+trading is more strictly geo-restricted than spot. This was ~2,900 near-
+identical noise lines/day for a structural limitation, not a bug to keep
+warning about. Now: per-symbol failures are silent (debug-level), and the
+cycle logs one aggregated "Funding Rate موفق: X/10" line instead, with a
+one-time explanatory note if it's fully unavailable. The feature itself
+was already correctly fail-open (funding_score stays 0, never blocks a
+signal) — this fix is purely about log noise, not correctness.
 
-All earlier features unchanged: v24 VWAP + Fair Value Gap, v23 full-
-candle-range TP/SL/trailing/warning detection, wick/order-flow scoring,
-v22 real automated trailing stop, 5-minute check interval, v21 state-
-persistence fix, v20 SELL-signal-symmetry fix, multi-timeframe confluence,
-R-multiple dashboard, structured logging, self-healing state, consecutive-
-fetch-failure alerting, ADX/Bollinger/Stochastic + RSI divergence
-warnings, per-symbol cooldown, 10-symbol coverage, parallel fetch, daily
-reports.
+Everything else unchanged from v25.0: Funding rate (Binance USDT-M
+futures, free) as a contrarian scoring input, MAX_CONCURRENT_TRADES
+portfolio-wide cap, atomic state writes (temp file + os.replace, so a
+mid-write kill can never corrupt state), and all earlier features: v24
+VWAP + Fair Value Gap, v23 full-candle-range TP/SL/trailing/warning
+detection, wick/order-flow scoring, v22 real automated trailing stop,
+5-minute check interval, v21 state-persistence fix, v20 SELL-signal-
+symmetry fix, multi-timeframe confluence, R-multiple dashboard,
+structured logging, self-healing state, consecutive-fetch-failure
+alerting, ADX/Bollinger/Stochastic + RSI divergence warnings, per-symbol
+cooldown, 10-symbol coverage, parallel fetch, daily reports.
 """
 
 from datetime import datetime, timezone
@@ -230,7 +232,12 @@ def process_symbol(state, symbol, klines_for_symbol, counters):
     # Free, optional positioning signal — fetched right before analysis (not
     # in the earlier bulk kline fetch) so a slow/failed funding-rate call
     # never delays or blocks the core 1H/4H analysis for every symbol.
+    # Failures are common and expected (see the caveat in data_engine.py)
+    # so they're tallied here for a single end-of-cycle summary line
+    # instead of a warning logged for every symbol every cycle.
     funding_rate = fetch_funding_rate(symbol)
+    if funding_rate is not None:
+        counters["funding_ok"] += 1
 
     result = analyze_market(safe_15m, df_1h, df_4h, safe_1d, symbol, funding_rate=funding_rate)
     if not result:
@@ -424,7 +431,7 @@ def main():
 
     maybe_send_daily_report(state)
 
-    counters = {"signals": 0, "closed": 0, "fetched_ok": 0}
+    counters = {"signals": 0, "closed": 0, "fetched_ok": 0, "funding_ok": 0}
     klines = fetch_all_klines(SYMBOLS)
 
     for symbol in SYMBOLS:
@@ -439,8 +446,16 @@ def main():
 
     log.info(
         f"✅ Cycle completed. سیگنال‌های جدید: {counters['signals']} | "
-        f"معاملات بسته‌شده: {counters['closed']} | نمادهای موفق: {counters['fetched_ok']}/{len(SYMBOLS)}"
+        f"معاملات بسته‌شده: {counters['closed']} | نمادهای موفق: {counters['fetched_ok']}/{len(SYMBOLS)} | "
+        f"Funding Rate موفق: {counters['funding_ok']}/{len(SYMBOLS)}"
     )
+    if counters["funding_ok"] == 0 and len(SYMBOLS) > 0:
+        log.info(
+            "ℹ️ Funding Rate در این چرخه از هیچ نمادی دریافت نشد — این معمولاً یعنی "
+            "fapi.binance.com از IP گیت‌هاب اکشن مسدود است (محدودیت جغرافیایی صرافی‌های "
+            "فیوچرز، نه باگ ربات). ربات بدون این داده هم کاملاً عادی کار می‌کند "
+            "(امتیاز این بخش صفر در نظر گرفته می‌شود)."
+        )
 
 
 if __name__ == "__main__":
