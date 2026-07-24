@@ -1,6 +1,22 @@
 #!/usr/bin/env python3
 """
-🚀 AI Quant Bot v25.9 - Remove HYPEUSDT (Futures-Only, No Spot Data Available)
+🚀 AI Quant Bot v25.10 - Fix Misleading Silence-Alert Message
+Fixes: the silence-watchdog alert (added in v25.5) told the person the
+most likely cause was hitting the free Actions-minute cap on a PRIVATE
+repo — but this bot's repo is Public, where Actions minutes are
+unlimited and free, so that explanation was simply wrong for this repo
+and sent the person chasing a billing page that would never explain
+anything. The real, well-documented cause for a Public repo on a tight
+5-minute `schedule` cron is GitHub's own scheduler: GitHub explicitly
+states that scheduled workflow runs are best-effort, not guaranteed to
+fire exactly on time, and are more likely to be delayed or occasionally
+skipped during periods of high load across GitHub — this effect is more
+pronounced the shorter the cron interval is. The message now says that
+instead. No logic change: still fires on exactly the same condition
+(gap_minutes > CYCLE_MINUTES * SILENCE_GAP_MULTIPLIER), still
+self-resolving, still silent on the very first run.
+
+v25.9 - Remove HYPEUSDT (Futures-Only, No Spot Data Available)
 Fixes a real issue found live: HYPEUSDT logged "Failed to fetch data
 from all endpoints" on every timeframe, every single cycle, after being
 added in v25.7. Root cause: Binance's GLOBAL platform (binance.com) only
@@ -590,7 +606,12 @@ def check_silence_gap(state):
     """Alert if an unusually large amount of time has passed since the
     last cycle successfully finished. This catches things a normal
     in-cycle check can't: the GitHub Actions workflow being paused,
-    auto-disabled, or hitting the free-tier minute cap, or several
+    auto-disabled, or (most likely for a Public repo on a tight 5-minute
+    cron) GitHub's own scheduler queueing/delaying — or occasionally
+    dropping — a `schedule` run during periods of high load across
+    GitHub; GitHub explicitly documents scheduled runs as best-effort,
+    not guaranteed to fire exactly on time, and this effect is more
+    pronounced the shorter the cron interval is. Also catches several
     consecutive crashes each swallowed individually by their own
     try/except with no cumulative signal. Without this, the person's
     only clue that something's wrong is the ABSENCE of Telegram
@@ -615,9 +636,11 @@ def check_silence_gap(state):
             f"⏰ <b>هشدار سکوت</b>\n"
             f"آخرین چرخهٔ کامل‌شدهٔ ربات حدود {gap_minutes:.0f} دقیقه پیش بود "
             f"(انتظار عادی: هر {CYCLE_MINUTES} دقیقه).\n"
-            f"این معمولاً یعنی GitHub Actions موقتاً متوقف شده — لطفاً تب Actions "
-            f"ریپازیتوری را چک کنید (رایج‌ترین دلیل: اتمام سقف دقیقهٔ رایگان ماهانه "
-            f"روی ریپازیتوری خصوصی، یا غیرفعال‌شدن دستی workflow)."
+            f"محتمل‌ترین دلیل: زمان‌بندی خودکار GitHub Actions (schedule) با "
+            f"فاصلهٔ کوتاه (هر {CYCLE_MINUTES} دقیقه) گاهی توسط خودِ GitHub با تأخیر اجرا "
+            f"می‌شود یا در بار ترافیکی بالا یک نوبت حذف می‌شود — این رفتاری مستند و شناخته‌شده "
+            f"در GitHub Actions است، نه لزوماً خرابی ربات. اگر این هشدار زیاد تکرار می‌شود، "
+            f"تب Actions ریپازیتوری را چک کنید؛ در غیر این صورت معمولاً چرخهٔ بعدی طبیعی از راه می‌رسد."
         )
 
 
