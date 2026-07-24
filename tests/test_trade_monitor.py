@@ -166,6 +166,36 @@ class TestTrailingStop(unittest.TestCase):
         # Without this fix, the original SL (90) would still be active and
         # this same reversal would have closed at a full -1.0R loss.
 
+    def test_v25_6_win_after_trailing_credits_full_original_r_not_zero(self):
+        """The actual bug reported live: because TRAILING_TRIGGER_R (0.5)
+        is always reached before TP (1.0), a trade's SL has *already* been
+        moved to breakeven by the time it goes on to hit full TP. Before
+        v25.6, r_multiple was recomputed from the CURRENT sl (now ==
+        entry), making risk_distance 0 and silently recording every such
+        win as 0.0R instead of its real reward — exactly matching a
+        reported "60% win rate but flat/negative equity" mismatch. With
+        "initial_risk" frozen at trade-open time, the win is now credited
+        correctly even after trailing has moved the live sl field."""
+        state = fresh_state()
+        state["trades"] = [{
+            "symbol": "BTCUSDT", "direction": "BUY", "entry": 100, "sl": 90, "tp": 130,
+            "status": "open", "sl_moved_to_breakeven": False,
+            "initial_risk": 10,  # abs(entry - original sl), as main.py now stores at open
+        }]
+
+        # Cycle 1: price reaches halfway -> SL trails to breakeven, but
+        # initial_risk must NOT change.
+        trade_monitor.check_trailing_stop(state, current_high=115, current_low=112, symbol="BTCUSDT")
+        self.assertEqual(state["trades"][0]["sl"], 100)
+        self.assertEqual(state["trades"][0]["initial_risk"], 10)
+
+        # Cycle 2: price goes on to hit full TP.
+        closed = trade_monitor.check_open_trades(state, current_high=132, current_low=129, current_close=131, symbol="BTCUSDT")
+
+        self.assertEqual(len(closed), 1)
+        self.assertEqual(closed[0]["result"], "WIN")
+        self.assertAlmostEqual(closed[0]["r_multiple"], 3.0, places=3)  # (130-100)/10, NOT 0.0
+
 
 class TestSlWarnings(unittest.TestCase):
     def test_fires_once_then_stays_silent_for_same_trade(self):
