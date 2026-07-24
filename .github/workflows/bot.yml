@@ -2,15 +2,22 @@ name: AI Quant Bot v25.1 - Trading Cycle
 
 on:
   schedule:
-    # Every 5 minutes (changed from 15, per request, to reduce entry
-    # delay). IMPORTANT COST NOTE: GitHub gives PRIVATE repos only 2,000
-    # free Actions minutes/month. At ~25-30s per run, 5-minute scheduling
-    # is roughly 4,300-5,200 min/month — over the free allowance. PUBLIC
-    # repos get UNLIMITED free Actions minutes. Check your usage anytime
-    # at Settings > Billing > Plans and usage > Actions. If you go over
-    # and don't want to make the repo public, change "*/5" back to "*/15"
-    # or "*/10" below.
-    - cron: "*/5 * * * *"
+    # Runs 8 times/hour at minutes 0,7,15,22,30,37,45,52 — alternating
+    # 7-minute and 8-minute gaps (7,8,7,8,7,8,7,8) so the AVERAGE interval
+    # is exactly 7.5 minutes (7 min 30 sec), the closest possible match to
+    # a "7m30s" cadence since standard cron has no seconds field and can
+    # only fire on whole-minute boundaries. Also set the "CYCLE_MINUTES"
+    # repo Variable to 8 (not 7) to match check_silence_gap()'s math in
+    # main.py — 8 is the worst-case single gap in this pattern, so using
+    # it (rather than the 7.5 average) keeps the silence-watchdog
+    # threshold from firing on a perfectly normal 8-minute gap.
+    # IMPORTANT COST NOTE: GitHub gives PRIVATE repos only 2,000 free
+    # Actions minutes/month. At ~25-30s per run, this ~8-run/hour cadence
+    # is roughly 2,300-2,900 min/month — still over the free allowance on
+    # a private repo. PUBLIC repos get UNLIMITED free Actions minutes
+    # (this repo is currently Public, so this is not a concern here).
+    # Check usage anytime at Settings > Billing > Plans and usage > Actions.
+    - cron: "0,7,15,22,30,37,45,52 * * * *"
   workflow_dispatch: {}
 
 permissions:
