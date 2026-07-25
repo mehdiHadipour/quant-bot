@@ -1,15 +1,11 @@
-name: AI Quant Bot v25.1 - Trading Cycle
+name: Quant Bot - Safe Trading Cycle
 
 on:
   schedule:
-    # Every 5 minutes (changed from 15, per request, to reduce entry
-    # delay). IMPORTANT COST NOTE: GitHub gives PRIVATE repos only 2,000
-    # free Actions minutes/month. At ~25-30s per run, 5-minute scheduling
-    # is roughly 4,300-5,200 min/month — over the free allowance. PUBLIC
-    # repos get UNLIMITED free Actions minutes. Check your usage anytime
-    # at Settings > Billing > Plans and usage > Actions. If you go over
-    # and don't want to make the repo public, change "*/5" back to "*/15"
-    # or "*/10" below.
+    # 10-minute cadence: this repo is Public (unlimited free Actions
+    # minutes), so the private-repo minute-budget reasoning for 15min
+    # doesn't apply here — kept at the previously-requested 10min, offset
+    # to avoid the top-of-hour scheduling contention window.
     - cron: "4-59/10 * * * *"
   workflow_dispatch: {}
 
@@ -23,48 +19,28 @@ concurrency:
 jobs:
   trading_bot:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 8
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-
-      - name: Setup Python
-        uses: actions/setup-python@v6
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: "pip"
-
       - name: Install dependencies
         run: pip install -r requirements.txt
-
-      - name: Ensure state/data directories exist
-        run: mkdir -p state data
-
-      # Fast static-analysis pass (unused imports, undefined names, obvious
-      # bugs). Deliberately just `ruff check`, not `black` — black only
-      # reformats style with no bug-catching value, and would create noisy
-      # diffs on a mobile-edited repo for no functional benefit. Also
-      # non-blocking, for the same reason the test step is (see below).
-      - name: Lint (ruff)
-        continue-on-error: true
+      - name: Static validation
+        run: python scripts/validate_project.py
+      - name: Lint
         run: |
           pip install ruff --quiet
           ruff check .
-
-      # Runs the tests/ suite before touching real trading logic. Deliberately
-      # non-blocking (continue-on-error): this bot is checked on periodically
-      # from a phone, and a flaky/environmental test failure silently halting
-      # the whole trading cycle for days would be worse than a visible warning
-      # in the Actions log. Treat a red "Run tests" step as "go take a look",
-      # not as "the bot is definitely broken".
+      - name: Generate ephemeral test encryption key
+        run: echo "ENCRYPTION_KEY=$(python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')" >> "$GITHUB_ENV"
       - name: Run tests
-        continue-on-error: true
         env:
-          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-          TELEGRAM_CHAT: ${{ secrets.TELEGRAM_CHAT }}
-          ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
+          TELEGRAM_TOKEN: test-token
+          TELEGRAM_CHAT: test-chat
         run: python -m unittest discover -s tests -t . -v
-
       - name: Run Quant Engine
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
@@ -80,37 +56,31 @@ jobs:
           SYMBOL_COOLDOWN_CYCLES: ${{ vars.SYMBOL_COOLDOWN_CYCLES }}
           CYCLE_MINUTES: ${{ vars.CYCLE_MINUTES }}
           TRAILING_TRIGGER_R: ${{ vars.TRAILING_TRIGGER_R }}
+          PARTIAL_LOCK_TRIGGER_R: ${{ vars.PARTIAL_LOCK_TRIGGER_R }}
+          PARTIAL_LOCK_R: ${{ vars.PARTIAL_LOCK_R }}
           MAX_CONCURRENT_TRADES: ${{ vars.MAX_CONCURRENT_TRADES }}
+          MAX_DAILY_LOSS_R: ${{ vars.MAX_DAILY_LOSS_R }}
+          MAX_OPEN_RISK_R: ${{ vars.MAX_OPEN_RISK_R }}
+          MIN_REWARD_RISK: ${{ vars.MIN_REWARD_RISK }}
+          MAX_SAME_DIRECTION_OPEN: ${{ vars.MAX_SAME_DIRECTION_OPEN }}
         run: python main.py
-
-      - name: Save state & history to repository
+      - name: Persist state and history
         run: |
           git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          # IMPORTANT: `git add fileA fileB fileC` fails ATOMICALLY — and
-          # stages NOTHING AT ALL, not even files that DO exist with real
-          # changes — if ANY single path in the list doesn't exist yet.
-          # data/history.csv doesn't exist until the first trade closes,
-          # and state/state.json.enc.bak doesn't exist until the second
-          # save in a session that already had a primary file — so the old
-          # single `git add a b c` call was silently discarding every
-          # state save from day one whenever either of those was still
-          # missing. Adding each path individually, only if it exists,
-          # fixes this for good.
-          for f in state/state.json.enc state/state.json.enc.bak data/history.csv; do
-            if [ -f "$f" ]; then
-              git add "$f"
-            fi
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for f in state/state.json.enc state/state.json.enc.bak data/history.csv.enc; do
+            [ -f "$f" ] && git add -f "$f"
           done
-
-          echo "--- git status (for diagnostics in the Actions log) ---"
-          git status --short
-
+          # v27.3: history.csv is now migrated to history.csv.enc on first
+          # run; explicitly stage the deletion of the old plaintext file
+          # if main.py already removed it locally, so it actually
+          # disappears from the repo instead of lingering in git history
+          # going forward (it stays in past commits either way — rotate
+          # ENCRYPTION_KEY if that old plaintext exposure is a concern).
+          if [ ! -f "data/history.csv" ]; then
+            git rm --cached --ignore-unmatch -q data/history.csv || true
+          fi
           if ! git diff --cached --quiet; then
-            git commit -m "chore: auto-update bot state & history [skip ci]"
+            git commit -m "chore: persist bot state [skip ci]"
             git push
-            echo "✅ Pushed state changes."
-          else
-            echo "No state changes to commit."
           fi
