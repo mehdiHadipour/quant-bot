@@ -10,7 +10,7 @@ on:
     # at Settings > Billing > Plans and usage > Actions. If you go over
     # and don't want to make the repo public, change "*/5" back to "*/15"
     # or "*/10" below.
-    - cron: "3-59/5 * * * *"
+    - cron: "4-59/10 * * * *"
   workflow_dispatch: {}
 
 permissions:
