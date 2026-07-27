@@ -6,7 +6,11 @@ on:
     # minutes), so the private-repo minute-budget reasoning for 15min
     # doesn't apply here — kept at the previously-requested 10min, offset
     # to avoid the top-of-hour scheduling contention window.
-    - cron: "4-59/10 * * * *"
+    # v27.4 (restored): fires every 5 minutes as a heartbeat — main.py
+    # itself decides whether enough real time (CYCLE_MINUTES) has passed
+    # to do any actual work, exiting in ~1-2s otherwise. See
+    # should_skip_cycle_early() in main.py.
+    - cron: "2-59/5 * * * *"
   workflow_dispatch: {}
 
 permissions:
