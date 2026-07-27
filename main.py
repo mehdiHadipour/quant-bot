@@ -515,10 +515,10 @@ def current_daily_loss_r():
 def process_symbol(state, symbol, klines_for_symbol, counters):
     log.info(f"📊 Analyzing {symbol}...")
 
-    live_15m = klines_for_symbol.get("15m")
+    # Trade management needs the LIVE (still-forming) 1H candle so
+    # intrabar TP/SL/trailing touches aren't missed — see _closed_candles
+    # above for why signal generation deliberately does NOT use it.
     live_1h = klines_for_symbol.get("1h")
-    live_4h = klines_for_symbol.get("4h")
-    live_1d = klines_for_symbol.get("1d")
 
     # Directional analysis is locked to completed candles. The live final
     # candle is retained separately for TP/SL/trailing monitoring.
@@ -911,9 +911,53 @@ def check_silence_gap(state):
         )
 
 
+def should_skip_cycle_early(state):
+    """v27.4 (restored — was dropped in the v27.5 package this was merged
+    from): the workflow's cron trigger fires every 5 minutes (a frequent
+    'heartbeat') instead of exactly every CYCLE_MINUTES — because live
+    results showed GitHub's own scheduler dropping/delaying individual
+    scheduled runs by 200+ minutes, well beyond documented normal jitter.
+    Waiting for the NEXT exact CYCLE_MINUTES-aligned slot after a drop
+    means waiting just as long again; a more frequent heartbeat means a
+    dropped/delayed trigger has another attempt just 5 minutes later
+    instead of up to CYCLE_MINUTES later.
+
+    But the actual expensive work (fetching klines for every symbol,
+    running analysis, committing to git) should still only happen once
+    every CYCLE_MINUTES, not every 5 — so every heartbeat first checks
+    how long it's actually been since the last COMPLETED cycle, and
+    exits immediately (no API calls, no git activity, a couple seconds
+    of runtime) if it's too soon. This does not change Actions minutes
+    billed (GitHub rounds up to 1 minute regardless), only reliability:
+    roughly 2x as many chances to actually land a real cycle within any
+    given CYCLE_MINUTES window.
+
+    Returns True (skip everything else this run) if a real cycle
+    completed too recently; False on the very first-ever run (nothing
+    to compare against) or once enough time has passed.
+    """
+    last_str = state.get("last_cycle_completed_at")
+    if not last_str:
+        return False
+    try:
+        last = datetime.fromisoformat(last_str)
+        elapsed_minutes = (datetime.now(timezone.utc) - last).total_seconds() / 60
+    except (ValueError, TypeError):
+        return False
+    return elapsed_minutes < CYCLE_MINUTES
+
+
 def main():
     log.info(f"🚀 Starting cycle - {datetime.now(timezone.utc).isoformat()}")
     state = load_state()
+
+    if should_skip_cycle_early(state):
+        log.info(
+            f"⏭️ کمتر از {CYCLE_MINUTES} دقیقه از آخرین چرخهٔ کامل گذشته — "
+            "این heartbeat بدون انجام کاری رد می‌شود."
+        )
+        return
+
     check_silence_gap(state)
 
     if state.get("circuit_breaker"):
