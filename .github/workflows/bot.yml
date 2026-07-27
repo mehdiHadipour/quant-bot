@@ -2,14 +2,14 @@ name: Quant Bot - Safe Trading Cycle
 
 on:
   schedule:
-    # GitHub Actions is only the wake-up mechanism.
-    # The Python engine itself decides whether 10 minutes have elapsed
-    # since the last successfully completed cycle.
+    # GitHub Actions schedules are best-effort and do NOT guarantee
+    # execution exactly every 10 minutes.
     #
-    # This decouples real cycle timing from wall-clock cron minutes.
-    - cron: "*/5 * * * *"
+    # This schedule intentionally runs every 10 minutes with an offset
+    # from minute 00 to reduce top-of-the-hour contention.
+    - cron: "4-59/10 * * * *"
 
-  workflow_dispatch: {}
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -24,9 +24,11 @@ jobs:
     timeout-minutes: 8
 
     steps:
-      - uses: actions/checkout@v6
+      - name: Checkout repository
+        uses: actions/checkout@v6
 
-      - uses: actions/setup-python@v6
+      - name: Setup Python
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: "pip"
@@ -43,19 +45,22 @@ jobs:
           ruff check .
 
       - name: Generate ephemeral test encryption key
-        run: echo "ENCRYPTION_KEY=$(python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')" >> "$GITHUB_ENV"
+        run: |
+          echo "ENCRYPTION_KEY=$(python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')" >> "$GITHUB_ENV"
 
       - name: Run tests
         env:
           TELEGRAM_TOKEN: test-token
           TELEGRAM_CHAT: test-chat
-        run: python -m unittest discover -s tests -t . -v
+        run: |
+          python -m unittest discover -s tests -t . -v
 
       - name: Run Quant Engine
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT: ${{ secrets.TELEGRAM_CHAT }}
           ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
+
           SYMBOLS: ${{ vars.SYMBOLS }}
           MIN_SIGNAL_PROBABILITY: ${{ vars.MIN_SIGNAL_PROBABILITY }}
           MIN_ADX: ${{ vars.MIN_ADX }}
@@ -66,14 +71,17 @@ jobs:
           SYMBOL_COOLDOWN_CYCLES: ${{ vars.SYMBOL_COOLDOWN_CYCLES }}
           CYCLE_MINUTES: ${{ vars.CYCLE_MINUTES }}
           SILENCE_GAP_MULTIPLIER: ${{ vars.SILENCE_GAP_MULTIPLIER }}
+
           TRAILING_TRIGGER_R: ${{ vars.TRAILING_TRIGGER_R }}
           PARTIAL_LOCK_TRIGGER_R: ${{ vars.PARTIAL_LOCK_TRIGGER_R }}
           PARTIAL_LOCK_R: ${{ vars.PARTIAL_LOCK_R }}
+
           MAX_CONCURRENT_TRADES: ${{ vars.MAX_CONCURRENT_TRADES }}
           MAX_DAILY_LOSS_R: ${{ vars.MAX_DAILY_LOSS_R }}
           MAX_OPEN_RISK_R: ${{ vars.MAX_OPEN_RISK_R }}
           MIN_REWARD_RISK: ${{ vars.MIN_REWARD_RISK }}
           MAX_SAME_DIRECTION_OPEN: ${{ vars.MAX_SAME_DIRECTION_OPEN }}
+
         run: python main.py
 
       - name: Persist state and history
@@ -81,15 +89,27 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          for f in state/state.json.enc state/state.json.enc.bak data/history.csv.enc; do
-            [ -f "$f" ] && git add -f "$f"
+          # Persist encrypted state and encrypted trade history.
+          for f in \
+            state/state.json.enc \
+            state/state.json.enc.bak \
+            data/history.csv.enc
+          do
+            if [ -f "$f" ]; then
+              git add -f "$f"
+            fi
           done
 
+          # Remove legacy plaintext history.csv from Git tracking
+          # if the migration has already deleted it locally.
           if [ ! -f "data/history.csv" ]; then
             git rm --cached --ignore-unmatch -q data/history.csv || true
           fi
 
+          # Commit and push only when there are actual changes.
           if ! git diff --cached --quiet; then
             git commit -m "chore: persist bot state [skip ci]"
             git push
+          else
+            echo "No state or history changes to persist."
           fi
