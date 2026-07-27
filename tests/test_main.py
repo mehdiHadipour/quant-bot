@@ -1,6 +1,7 @@
 import unittest
+from datetime import datetime, timedelta, timezone
 
-from main import has_reached_max_concurrent_trades, prepare_analysis_frames
+from main import has_reached_max_concurrent_trades, prepare_analysis_frames, should_skip_cycle_early
 import pandas as pd
 import config
 
@@ -41,6 +42,25 @@ class TestMaxConcurrentTrades(unittest.TestCase):
         state = {"trades": [{"status": "closed"}] * 10 + [{"status": "open"}]}
         self.assertFalse(has_reached_max_concurrent_trades(state))
 
+
+
+class TestHeartbeatEarlyExit(unittest.TestCase):
+    """v27.4 (restored — was dropped in the v27.5 package this was merged
+    from). See should_skip_cycle_early() in main.py."""
+    def test_first_ever_run_never_skips(self):
+        self.assertFalse(should_skip_cycle_early({}))
+        self.assertFalse(should_skip_cycle_early({"last_cycle_completed_at": None}))
+
+    def test_skips_when_within_cycle_window(self):
+        recent = (datetime.now(timezone.utc) - timedelta(minutes=3)).isoformat()
+        self.assertTrue(should_skip_cycle_early({"last_cycle_completed_at": recent}))
+
+    def test_does_not_skip_once_cycle_minutes_elapsed(self):
+        old = (datetime.now(timezone.utc) - timedelta(minutes=config.CYCLE_MINUTES + 1)).isoformat()
+        self.assertFalse(should_skip_cycle_early({"last_cycle_completed_at": old}))
+
+    def test_malformed_timestamp_does_not_skip(self):
+        self.assertFalse(should_skip_cycle_early({"last_cycle_completed_at": "not-a-date"}))
 
 
 class TestClosedCandleSignalIsolation(unittest.TestCase):
