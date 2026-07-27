@@ -2,11 +2,13 @@ name: Quant Bot - Safe Trading Cycle
 
 on:
   schedule:
-    # 10-minute cadence: this repo is Public (unlimited free Actions
-    # minutes), so the private-repo minute-budget reasoning for 15min
-    # doesn't apply here — kept at the previously-requested 10min, offset
-    # to avoid the top-of-hour scheduling contention window.
-    - cron: "4-59/10 * * * *"
+    # GitHub Actions is only the wake-up mechanism.
+    # The Python engine itself decides whether 10 minutes have elapsed
+    # since the last successfully completed cycle.
+    #
+    # This decouples real cycle timing from wall-clock cron minutes.
+    - cron: "*/5 * * * *"
+
   workflow_dispatch: {}
 
 permissions:
@@ -20,27 +22,35 @@ jobs:
   trading_bot:
     runs-on: ubuntu-latest
     timeout-minutes: 8
+
     steps:
       - uses: actions/checkout@v6
+
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: "pip"
+
       - name: Install dependencies
         run: pip install -r requirements.txt
+
       - name: Static validation
         run: python scripts/validate_project.py
+
       - name: Lint
         run: |
           pip install ruff --quiet
           ruff check .
+
       - name: Generate ephemeral test encryption key
         run: echo "ENCRYPTION_KEY=$(python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')" >> "$GITHUB_ENV"
+
       - name: Run tests
         env:
           TELEGRAM_TOKEN: test-token
           TELEGRAM_CHAT: test-chat
         run: python -m unittest discover -s tests -t . -v
+
       - name: Run Quant Engine
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
@@ -55,6 +65,7 @@ jobs:
           SL_WARNING_THRESHOLD: ${{ vars.SL_WARNING_THRESHOLD }}
           SYMBOL_COOLDOWN_CYCLES: ${{ vars.SYMBOL_COOLDOWN_CYCLES }}
           CYCLE_MINUTES: ${{ vars.CYCLE_MINUTES }}
+          SILENCE_GAP_MULTIPLIER: ${{ vars.SILENCE_GAP_MULTIPLIER }}
           TRAILING_TRIGGER_R: ${{ vars.TRAILING_TRIGGER_R }}
           PARTIAL_LOCK_TRIGGER_R: ${{ vars.PARTIAL_LOCK_TRIGGER_R }}
           PARTIAL_LOCK_R: ${{ vars.PARTIAL_LOCK_R }}
@@ -64,22 +75,20 @@ jobs:
           MIN_REWARD_RISK: ${{ vars.MIN_REWARD_RISK }}
           MAX_SAME_DIRECTION_OPEN: ${{ vars.MAX_SAME_DIRECTION_OPEN }}
         run: python main.py
+
       - name: Persist state and history
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
           for f in state/state.json.enc state/state.json.enc.bak data/history.csv.enc; do
             [ -f "$f" ] && git add -f "$f"
           done
-          # v27.3: history.csv is now migrated to history.csv.enc on first
-          # run; explicitly stage the deletion of the old plaintext file
-          # if main.py already removed it locally, so it actually
-          # disappears from the repo instead of lingering in git history
-          # going forward (it stays in past commits either way — rotate
-          # ENCRYPTION_KEY if that old plaintext exposure is a concern).
+
           if [ ! -f "data/history.csv" ]; then
             git rm --cached --ignore-unmatch -q data/history.csv || true
           fi
+
           if ! git diff --cached --quiet; then
             git commit -m "chore: persist bot state [skip ci]"
             git push
