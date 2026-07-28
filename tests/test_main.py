@@ -1,7 +1,10 @@
 import unittest
 from datetime import datetime, timedelta, timezone
 
-from main import has_reached_max_concurrent_trades, prepare_analysis_frames, should_skip_cycle_early
+from main import (
+    has_reached_max_concurrent_trades, prepare_analysis_frames, should_skip_cycle_early,
+    _decimals_for_reference_price, format_price,
+)
 import pandas as pd
 import config
 
@@ -61,6 +64,43 @@ class TestHeartbeatEarlyExit(unittest.TestCase):
 
     def test_malformed_timestamp_does_not_skip(self):
         self.assertFalse(should_skip_cycle_early({"last_cycle_completed_at": "not-a-date"}))
+
+
+class TestAdaptivePriceFormatting(unittest.TestCase):
+    """Regression tests for a real reported bug: a fixed 2-decimal
+    format made entry/SL/TP/ATR/VWAP for low-price symbols (DOGE, DOT,
+    etc.) all round to the same indistinguishable value."""
+
+    def test_low_price_symbol_gets_enough_decimals(self):
+        d = _decimals_for_reference_price(0.07384)
+        self.assertEqual(format_price(0.07384, d), "0.07384")
+        self.assertEqual(format_price(0.07251, d), "0.07251")
+        self.assertEqual(format_price(0.07783, d), "0.07783")
+        # ATR at a very different magnitude still uses the SAME decimals
+        # as the reference price, for visual consistency within one message.
+        self.assertEqual(format_price(0.00121, d), "0.00121")
+
+    def test_high_price_symbol_keeps_two_decimals_with_grouping(self):
+        d = _decimals_for_reference_price(117245.30)
+        self.assertEqual(format_price(117245.30, d), "117,245.30")
+        self.assertEqual(format_price(116810.20, d), "116,810.20")
+
+    def test_zero_and_invalid_fail_safe(self):
+        self.assertEqual(_decimals_for_reference_price(0), 2)
+        self.assertEqual(_decimals_for_reference_price(None), 2)
+        self.assertEqual(_decimals_for_reference_price("not a number"), 2)
+        self.assertEqual(format_price("not a number", 2), "not a number")
+
+    def test_decimals_increase_as_price_gets_smaller(self):
+        prices_and_min_decimals = [
+            (5.0, 2), (0.5, 4), (0.05, 5), (0.005, 6), (0.0005, 7),
+        ]
+        prev_decimals = 0
+        for price, expected in prices_and_min_decimals:
+            d = _decimals_for_reference_price(price)
+            self.assertEqual(d, expected, f"price={price}")
+            self.assertGreaterEqual(d, prev_decimals)
+            prev_decimals = d
 
 
 class TestClosedCandleSignalIsolation(unittest.TestCase):
