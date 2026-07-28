@@ -306,6 +306,52 @@ HISTORY_COLUMNS = [
     "exit_time", "exit_price", "result", "r_multiple",
 ]
 
+
+def _decimals_for_reference_price(price):
+    """How many decimal places to show for a symbol's prices, based on
+    its typical price level (using the signal's own entry price as the
+    reference) — computed ONCE per message and applied to every related
+    number (entry/SL/TP/ATR/VWAP/exit) so they stay visually consistent
+    within one alert.
+
+    Fixes a real bug: every price field previously used a fixed
+    f"{value:,.2f}" — fine for BTC (~117,000.00) but for a sub-$1 coin
+    like DOGEUSDT (~0.07) or DOTUSDT, entry/SL/TP/ATR/VWAP all rounded
+    to the same "0.07", making them visually indistinguishable and
+    hiding real information (e.g. ATR showing "0.00" even when the
+    actual value was a meaningful 0.8% of price). Deliberately computed
+    from the reference price's own magnitude, not a per-symbol lookup
+    table — Binance's actual tickSize/precision per symbol would need a
+    dedicated API call and ongoing maintenance as symbols are added;
+    this approximates it well enough for human-readable alerts, which is
+    all this is used for (never for order precision/rounding, since this
+    bot is signal-only and never places real orders)."""
+    try:
+        price = abs(float(price))
+    except (TypeError, ValueError):
+        return 2
+    if price == 0 or price >= 1:
+        return 2
+    if price >= 0.1:
+        return 4
+    if price >= 0.01:
+        return 5
+    if price >= 0.001:
+        return 6
+    if price >= 0.0001:
+        return 7
+    return 8
+
+
+def format_price(value, decimals):
+    """Format a single number at the given decimal count (from
+    _decimals_for_reference_price), with thousands separators."""
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    return f"{value:,.{decimals}f}"
+
 # Timeframes fetched for every symbol each cycle:
 #   15m — short-term momentum confirmation (final entry-timing gate)
 #   1h  — primary indicator/entry timeframe (unchanged core logic)
@@ -472,13 +518,14 @@ def build_risk_tip(direction, price, sl, tp):
     halfway = price + (tp - price) * TRAILING_TRIGGER_R if direction == "BUY" else price - (price - tp) * TRAILING_TRIGGER_R
     lock_point = price + (tp - price) * PARTIAL_LOCK_TRIGGER_R if direction == "BUY" else price - (price - tp) * PARTIAL_LOCK_TRIGGER_R
     lock_price = price + risk_per_unit * PARTIAL_LOCK_R if direction == "BUY" else price - risk_per_unit * PARTIAL_LOCK_R
+    d = _decimals_for_reference_price(price)
     return (
         f"\n💡 <b>راهنمای مدیریت ریسک</b>:\n"
         f"• اندازهٔ پوزیشن پیشنهادی برای ریسک {RISK_PERCENT_PER_TRADE:.1f}٪ سرمایه:\n"
-        f"  (سرمایهٔ شما × {RISK_PERCENT_PER_TRADE:.1f}٪) ÷ {risk_per_unit:,.2f}\n"
+        f"  (سرمایهٔ شما × {RISK_PERCENT_PER_TRADE:.1f}٪) ÷ {format_price(risk_per_unit, d)}\n"
         f"• 🔒 Trailing خودکار، دو مرحله‌ای:\n"
-        f"  ۱) وقتی قیمت به {halfway:,.2f} برسد، SL به نقطهٔ ورود ({price:,.2f}) منتقل می‌شود — دیگر ریسکی ندارد.\n"
-        f"  ۲) وقتی قیمت به {lock_point:,.2f} برسد، SL به {lock_price:,.2f} منتقل می‌شود — یعنی حتی با برگشت کامل، "
+        f"  ۱) وقتی قیمت به {format_price(halfway, d)} برسد، SL به نقطهٔ ورود ({format_price(price, d)}) منتقل می‌شود — دیگر ریسکی ندارد.\n"
+        f"  ۲) وقتی قیمت به {format_price(lock_point, d)} برسد، SL به {format_price(lock_price, d)} منتقل می‌شود — یعنی حتی با برگشت کامل، "
         f"{PARTIAL_LOCK_R:.2f}R سود واقعی برایتان قفل شده، نه فقط بدون‌ضرر.\n"
         f"نیازی نیست خودتان دستی این کارها را انجام دهید."
     )
@@ -558,14 +605,15 @@ def process_symbol(state, symbol, klines_for_symbol, counters):
     if trailing_moves:
         for move in trailing_moves:
             trade = move["trade"]
+            d = _decimals_for_reference_price(trade["entry"])
             if move["stage"] == "partial_lock":
                 locked_r = PARTIAL_LOCK_R
                 send_telegram_alert(
                     f"🔒 <b>سود جزئی قفل شد (Partial Lock)</b> - {symbol}\n"
                     f"جهت: {trade['direction']}\n"
-                    f"قیمت ورود: {trade['entry']:,.2f}\n"
-                    f"SL جدید: {trade['sl']:,.2f}\n"
-                    f"قیمت فعلی: {current_close:,.2f}\n"
+                    f"قیمت ورود: {format_price(trade['entry'], d)}\n"
+                    f"SL جدید: {format_price(trade['sl'], d)}\n"
+                    f"قیمت فعلی: {format_price(current_close, d)}\n"
                     f"از این لحظه، حتی اگر بازار کامل برگردد، این معامله حداقل "
                     f"{locked_r:.2f}R سود واقعی برایتان تضمین کرده — نه فقط بدون‌ضرر."
                 )
@@ -573,8 +621,8 @@ def process_symbol(state, symbol, klines_for_symbol, counters):
                 send_telegram_alert(
                     f"🔒 <b>SL به نقطهٔ ورود منتقل شد (Breakeven)</b> - {symbol}\n"
                     f"جهت: {trade['direction']}\n"
-                    f"قیمت ورود: {trade['entry']:,.2f}\n"
-                    f"قیمت فعلی: {current_close:,.2f}\n"
+                    f"قیمت ورود: {format_price(trade['entry'], d)}\n"
+                    f"قیمت فعلی: {format_price(current_close, d)}\n"
                     f"از این لحظه، این معامله دیگر ریسکی برای شما ندارد."
                 )
         save_state(state)
@@ -585,12 +633,13 @@ def process_symbol(state, symbol, klines_for_symbol, counters):
     sl_warnings = check_sl_warnings(state, current_high, current_low, current_close, symbol)
     if sl_warnings:
         for trade in sl_warnings:
+            d = _decimals_for_reference_price(trade["entry"])
             send_telegram_alert(
                 f"⚠️ <b>هشدار نزدیک‌شدن به SL</b> - {symbol}\n"
                 f"جهت: {trade['direction']}\n"
-                f"قیمت ورود: {trade['entry']:,.2f}\n"
-                f"قیمت فعلی: {current_close:,.2f}\n"
-                f"حد ضرر (SL): {trade['sl']:,.2f}\n"
+                f"قیمت ورود: {format_price(trade['entry'], d)}\n"
+                f"قیمت فعلی: {format_price(current_close, d)}\n"
+                f"حد ضرر (SL): {format_price(trade['sl'], d)}\n"
                 f"قیمت به نزدیکی حد ضرر رسیده — مراقب باشید."
             )
         save_state(state)
@@ -607,11 +656,12 @@ def process_symbol(state, symbol, klines_for_symbol, counters):
             counters["closed"] += 1
             emoji = "✅" if trade["result"] == "WIN" else "❌"
             r = trade.get("r_multiple", 0.0)
+            d = _decimals_for_reference_price(trade["entry"])
             send_telegram_alert(
                 f"{emoji} <b>معامله بسته شد</b> - {symbol}\n"
                 f"نتیجه: {trade['result']} ({r:+.2f}R)\n"
-                f"ورود: {trade['entry']:,.2f}\n"
-                f"خروج: {trade['exit_price']:,.2f}"
+                f"ورود: {format_price(trade['entry'], d)}\n"
+                f"خروج: {format_price(trade['exit_price'], d)}"
             )
         save_state(state)
         # A trade just closed this cycle; wait for the next cycle before
@@ -700,19 +750,20 @@ def process_symbol(state, symbol, klines_for_symbol, counters):
         log.warning(f"🛡️ {symbol}: سیگنال به‌دلیل کنترل ریسک رد شد — {risk_reason}")
         return
 
+    d = _decimals_for_reference_price(price)
     msg = f"""
 🚨 <b>سیگنال جدید</b> - {result['symbol']}
 📊 جهت: {direction}
 🕯️ تصمیم بر اساس آخرین کندل کاملاً بسته‌شدهٔ 1H (کندل در حال تشکیل در تشخیص جهت دخالت ندارد)
 📈 احتمال BUY: {result['buy']:.1f}%
 📉 احتمال SELL: {result['sell']:.1f}%
-💰 قیمت ورود: {price:,.2f}
-🛑 SL: {sl:,.2f}
-🎯 TP: {tp:,.2f}
-⚠️ ATR: {atr:,.2f} ({(atr / price * 100):.2f}%)
+💰 قیمت ورود: {format_price(price, d)}
+🛑 SL: {format_price(sl, d)}
+🎯 TP: {format_price(tp, d)}
+⚠️ ATR: {format_price(atr, d)} ({(atr / price * 100):.2f}%)
 📶 ADX: {result.get('adx', 0):.1f}
 📊 فشار سفارش (Taker Buy): {result.get('buy_ratio', 0.5) * 100:.0f}%
-📐 VWAP: {result.get('vwap', 0):,.2f} (قیمت {'بالای' if price > result.get('vwap', price) else 'زیر'} VWAP)
+📐 VWAP: {format_price(result.get('vwap', 0), d)} (قیمت {'بالای' if price > result.get('vwap', price) else 'زیر'} VWAP)
 🧭 تأیید چندتایم‌فریمی: 15m + 1H + 4H + 1D هم‌جهت
 """
 
@@ -829,7 +880,8 @@ def maybe_send_daily_report(state):
     open_trades = [t for t in state.get("trades", []) if t.get("status") == "open"]
     if open_trades:
         open_lines = "\n".join(
-            f"  • {t['symbol']} {t['direction']} — ورود: {t['entry']:,.2f}"
+            f"  • {t['symbol']} {t['direction']} — ورود: "
+            f"{format_price(t['entry'], _decimals_for_reference_price(t['entry']))}"
             for t in open_trades
         )
     else:
