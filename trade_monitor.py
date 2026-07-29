@@ -4,7 +4,7 @@ from config import SL_WARNING_THRESHOLD, SYMBOL_COOLDOWN_CYCLES, TRAILING_TRIGGE
 from logger import log
 
 
-def check_open_trades(state, current_high, current_low, current_close, symbol):
+def check_open_trades(state, current_high, current_low, current_close, symbol, as_of=None):
     """Check open trades for the symbol against the latest candle's full
     price range (high/low), not just its closing price.
 
@@ -19,8 +19,14 @@ def check_open_trades(state, current_high, current_low, current_close, symbol):
     tick-level data — we conservatively assume the stop was hit first,
     which never overstates performance.
 
+    `as_of`: optional historical timestamp (datetime) used for
+    `exit_time` instead of the real wall clock — lets a backtest replay
+    record the actual historical exit time of each simulated trade. Live
+    callers never pass this, so behavior there is unchanged (real now).
+
     Returns a list of the fully-updated closed trade dicts.
     """
+    exit_time = as_of or datetime.now(timezone.utc)
     remaining_trades = []
     closed_trades = []
     for trade in state["trades"]:
@@ -46,7 +52,7 @@ def check_open_trades(state, current_high, current_low, current_close, symbol):
             else:
                 trade["result"] = "WIN"
                 trade["exit_price"] = trade["tp"]
-            trade["exit_time"] = datetime.now(timezone.utc).isoformat()
+            trade["exit_time"] = exit_time.isoformat()
 
             # R-multiple: how many "risk units" (the ORIGINAL distance from
             # entry to SL, frozen at trade open) this trade made or lost.
@@ -169,22 +175,28 @@ def check_sl_warnings(state, current_high, current_low, current_close, symbol):
     return warnings
 
 
-def is_symbol_on_cooldown(state, symbol):
+def is_symbol_on_cooldown(state, symbol, as_of=None):
     """True if this symbol just took a loss recently and is still within
-    its cooldown window (see SYMBOL_COOLDOWN_CYCLES in config.py)."""
+    its cooldown window (see SYMBOL_COOLDOWN_CYCLES in config.py).
+    `as_of`: optional historical timestamp for backtest replay — see
+    check_open_trades for why. Live callers never pass this."""
+    now = as_of or datetime.now(timezone.utc)
     cooldowns = state.setdefault("symbol_cooldowns", {})
     until_str = cooldowns.get(symbol)
     if not until_str:
         return False
     until = datetime.fromisoformat(until_str)
-    if datetime.now(timezone.utc) < until:
+    if now < until:
         return True
     # Cooldown has expired — clean it up so state doesn't grow forever.
     del cooldowns[symbol]
     return False
 
 
-def update_circuit_breaker(state, closed_trades):
+def update_circuit_breaker(state, closed_trades, as_of=None):
+    """`as_of`: optional historical timestamp for backtest replay — see
+    check_open_trades for why. Live callers never pass this."""
+    now = as_of or datetime.now(timezone.utc)
     cooldowns = state.setdefault("symbol_cooldowns", {})
     stats = state["stats"]
 
@@ -212,10 +224,10 @@ def update_circuit_breaker(state, closed_trades):
 
             if SYMBOL_COOLDOWN_CYCLES > 0:
                 cooldown_minutes = SYMBOL_COOLDOWN_CYCLES * CYCLE_MINUTES
-                until = datetime.now(timezone.utc) + timedelta(minutes=cooldown_minutes)
+                until = now + timedelta(minutes=cooldown_minutes)
                 cooldowns[trade["symbol"]] = until.isoformat()
                 log.info(f"🧊 {trade['symbol']} تا {until.isoformat()} در حالت Cooldown قرار گرفت.")
 
         if stats["streak"] >= 3:
-            state["circuit_breaker"] = (datetime.now(timezone.utc) + timedelta(hours=6)).isoformat()
+            state["circuit_breaker"] = (now + timedelta(hours=6)).isoformat()
             log.warning("🛑 Circuit breaker activated for 6 hours!")
