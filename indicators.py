@@ -9,7 +9,6 @@ from config import (
     MIN_ATR_PERCENT,
     MAX_ATR_PERCENT,
     MIN_SIGNAL_SCORE,
-    MIN_DI_EDGE,
 )
 
 # ema_200 needs a reasonable amount of history to be meaningful; below this
@@ -245,6 +244,7 @@ def _directional_components(df, df_4h, funding_rate=None):
         "ema_50": float(ema_50),
         "ema_200": float(ema_200),
         "liquidity_sweep": liquidity_sweep,
+        "fvg": fvg,
         "divergence": detect_rsi_divergence(close, rsi_series),
     }
 
@@ -297,10 +297,6 @@ def analyze_market(df_15m, df_1h, df_4h, df_1d, symbol, funding_rate=None, reaso
     if d["adx"] < MIN_ADX:
         return _skip(f"ADX {d['adx']:.1f} < {MIN_ADX:.1f}; بازار روند کافی ندارد.")
 
-    di_edge = abs(d["di_plus"] - d["di_minus"])
-    if di_edge < MIN_DI_EDGE:
-        return _skip(f"فاصلهٔ DI برای ورود کافی نیست: {di_edge:.1f} < {MIN_DI_EDGE:.1f}.")
-
     bias_4h = get_timeframe_bias(df_4h)
     bias_1d = get_timeframe_bias(df_1d)
     if bias_4h is None or bias_1d is None or bias_4h != bias_1d:
@@ -341,19 +337,6 @@ def analyze_market(df_15m, df_1h, df_4h, df_1d, symbol, funding_rate=None, reaso
     if direction == "SELL" and not (close15 < ema15 and not slope_up and macd15_now < macd15_sig):
         return _skip("تأیید 15m برای SELL کامل نیست.")
 
-    # 1H momentum alignment gate: avoid entries when execution timeframe
-    # is rolling against the 4H/1D regime.
-    ema20_1h = ta.trend.EMAIndicator(df_1h["close"], window=20).ema_indicator()
-    if len(df_1h) < 22 or pd.isna(ema20_1h.iloc[-1]) or pd.isna(ema20_1h.iloc[-2]):
-        return _skip("دادهٔ 1H برای تأیید مومنتوم کافی نیست.")
-    close1h = float(df_1h["close"].iloc[-1])
-    ema1h = float(ema20_1h.iloc[-1])
-    slope1h_up = ema20_1h.iloc[-1] > ema20_1h.iloc[-2]
-    if direction == "BUY" and not (close1h > ema1h and slope1h_up and d["di_plus"] > d["di_minus"]):
-        return _skip("هم‌جهتی مومنتوم 1H/DI برای BUY کامل نیست.")
-    if direction == "SELL" and not (close1h < ema1h and not slope1h_up and d["di_minus"] > d["di_plus"]):
-        return _skip("هم‌جهتی مومنتوم 1H/DI برای SELL کامل نیست.")
-
     # Avoid entering after an exhausted impulse: require room for the ATR
     # target without entering at an extreme Bollinger extension.
     if direction == "BUY" and d["bb_pband"] > 1.25:
@@ -393,7 +376,7 @@ def analyze_market(df_15m, df_1h, df_4h, df_1d, symbol, funding_rate=None, reaso
         "vwap": d["vwap"],
         "funding_rate": funding_rate,
         "liquidity_sweep": d["liquidity_sweep"],
-        "fvg": fvg,
+        "fvg": d["fvg"],
         "score_breakdown": dict(sorted(d["components"].items(), key=lambda kv: abs(kv[1]), reverse=True)),
         "total_score": score,
         "atr_percent": atr_percent,
