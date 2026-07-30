@@ -138,13 +138,15 @@ def _directional_components(df, df_4h, funding_rate=None):
         elif high.iloc[-1] < low.iloc[-3]:
             fvg = "bearish"
 
-    liquidity_sweep = None
-    swept_sell_side = current_low < prev_low
-    swept_buy_side = current_high > prev_high
-    if swept_sell_side and current_close > prev_low:
-        liquidity_sweep = "bullish"
-    elif swept_buy_side and current_close < prev_high:
-        liquidity_sweep = "bearish"
+            "liquidity_sweep": d["liquidity_sweep"],
+        "fvg": d["fvg"],
+        "score_breakdown": dict(
+            sorted(
+                d["components"].items(),
+                key=lambda kv: abs(kv[1]),
+                reverse=True,
+            )
+        ),
 
     body = abs(current_close - current_open)
     upper_wick = current_high - max(current_open, current_close)
