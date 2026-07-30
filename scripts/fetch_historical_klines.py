@@ -96,18 +96,10 @@ def main():
     parser.add_argument("--days", type=int, default=180, help="How many days of history to fetch")
     parser.add_argument("--intervals", default="15m,1h,4h,1d")
     parser.add_argument("--out-dir", default="backtest_data")
-    parser.add_argument(
-        "--warmup-days", type=int, default=220,
-        help="Extra calendar days fetched BEFORE the requested test window, "
-             "so slow indicators (e.g. a 1D EMA200 / the bot's 210-candle "
-             "minimum for daily-timeframe confirmation) have enough real "
-             "history by the time the actual test period begins. Must "
-             "exceed indicators.MIN_CANDLES (210); default has margin.",
-    )
     args = parser.parse_args()
 
     end_ms = int(time.time() * 1000)
-    start_ms = end_ms - (args.days + args.warmup_days) * 24 * 60 * 60 * 1000
+    start_ms = end_ms - args.days * 24 * 60 * 60 * 1000
     os.makedirs(args.out_dir, exist_ok=True)
 
     symbols = [s.strip() for s in args.symbols.split(",") if s.strip()]
