@@ -79,10 +79,10 @@ SYMBOLS = [
     if s.strip()
 ]
 
-MIN_SIGNAL_PROBABILITY = _bounded_float_env("MIN_SIGNAL_PROBABILITY", 75.0, 0.0, 100.0)
+MIN_SIGNAL_PROBABILITY = _bounded_float_env("MIN_SIGNAL_PROBABILITY", 72.0, 0.0, 100.0)
 MIN_ADX = _bounded_float_env("MIN_ADX", 25.0, 0.0, 100.0)
 ATR_SL_MULTIPLIER = _bounded_float_env("ATR_SL_MULTIPLIER", 1.8, 0.1, 20.0)
-ATR_TP_MULTIPLIER = _bounded_float_env("ATR_TP_MULTIPLIER", 3.6, 0.1, 50.0)
+ATR_TP_MULTIPLIER = _bounded_float_env("ATR_TP_MULTIPLIER", 3.0, 0.1, 50.0)
 RISK_PERCENT_PER_TRADE = _bounded_float_env("RISK_PERCENT_PER_TRADE", 1.0, 0.01, 100.0)
 SL_WARNING_THRESHOLD = _bounded_float_env("SL_WARNING_THRESHOLD", 0.8, 0.0, 1.0)
 TRAILING_TRIGGER_R = _bounded_float_env("TRAILING_TRIGGER_R", 0.5, 0.0, 1.0)
@@ -104,5 +104,3 @@ MAX_SAME_DIRECTION_OPEN = _positive_int_env("MAX_SAME_DIRECTION_OPEN", 2, minimu
 MIN_ATR_PERCENT = _bounded_float_env("MIN_ATR_PERCENT", 0.35, 0.05, 10.0)
 MAX_ATR_PERCENT = _bounded_float_env("MAX_ATR_PERCENT", 8.0, 0.5, 50.0)
 MIN_SIGNAL_SCORE = _bounded_float_env("MIN_SIGNAL_SCORE", 32.0, 0.0, 200.0)
-
-MIN_DI_EDGE = _bounded_float_env("MIN_DI_EDGE", 5.0, 0.0, 50.0)
