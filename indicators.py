@@ -139,7 +139,7 @@ def _directional_components(df, df_4h, funding_rate=None):
             fvg = "bearish"
 
             "liquidity_sweep": d["liquidity_sweep"],
-        "fvg": d["fvg"],
+      ,  fvg": d["fvg"],
         "score_breakdown": dict(
             sorted(
                 d["components"].items(),
