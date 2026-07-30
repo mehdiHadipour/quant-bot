@@ -1,8 +1,0 @@
-line-length = 200
-
-[lint]
-# Keep this focused on catching real bugs (unused imports, undefined names,
-# etc.) rather than style nitpicks — the long Persian message strings in
-# this project are long by necessity, not sloppiness.
-select = ["E9", "F"]
-ignore = ["E501"]
