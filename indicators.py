@@ -316,10 +316,19 @@ def analyze_market(df_15m, df_1h, df_4h, df_1d, symbol, funding_rate=None, reaso
             f"اعتماد {confidence:.1f}% کمتر از حداقل {MIN_SIGNAL_PROBABILITY:.1f}% است."
         )
 
+    # 4H/1D agreement is a regime filter, not an absolute one-way lock.
+    # The previous hard gate forced every signal to follow the higher-timeframe
+    # regime. In a prolonged bear regime this can make the strategy literally
+    # SELL-only, even when a strong 1H reversal is confirmed by 15m momentum.
+    # Keep the regime agreement requirement, but allow a high-quality
+    # counter-trend reversal with a materially higher score threshold.
     regime_direction = "BUY" if bias_4h == "BULL" else "SELL"
-    if direction != regime_direction:
+    countertrend = direction != regime_direction
+    countertrend_min_score = max(MIN_SIGNAL_SCORE, 38.0)
+    if countertrend and abs(score) < countertrend_min_score:
         return _skip(
-            f"جهت کوتاه‌مدت {direction} خلاف رژیم 4H/1D ({regime_direction}) است."
+            f"سیگنال {direction} خلاف رژیم 4H/1D است و امتیاز {abs(score):.1f} "
+            f"به حد لازم برای بازگشت قدرتمند ({countertrend_min_score:.1f}) نرسیده است."
         )
 
     # 15m confirmation: EMA20 slope + close position + MACD direction.
