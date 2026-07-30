@@ -159,9 +159,16 @@ def _directional_components(df, df_4h, funding_rate=None):
     # "positive risk/volume" points that accidentally weaken SELL signals.
     components = {}
     components["Trend (EMA)"] = 18 if ema_50 > ema_200 else -18
-    components["4H Trend"] = 16 if df_4h["close"].iloc[-1] > ta.trend.EMAIndicator(
-        df_4h["close"], window=200
-    ).ema_indicator().iloc[-1] else -16
+    # Use the same EMA50-vs-EMA200 regime definition on 4H that is used
+    # everywhere else. The previous implementation compared 4H price only
+    # with EMA200, which could label a recovering market BEAR for a long time
+    # even after EMA50 had crossed above EMA200. That asymmetry was a major
+    # source of persistent SELL bias in walk-forward results.
+    bias_4h_score = get_timeframe_bias(df_4h)
+    if bias_4h_score == "BULL":
+        components["4H Trend"] = 16
+    elif bias_4h_score == "BEAR":
+        components["4H Trend"] = -16
 
     if macd > macd_signal:
         components["MACD"] = 10
@@ -244,7 +251,7 @@ def _directional_components(df, df_4h, funding_rate=None):
         "ema_50": float(ema_50),
         "ema_200": float(ema_200),
         "liquidity_sweep": liquidity_sweep,
-        "fvg": fvg,
+        "fvg": d["fvg"],
         "divergence": detect_rsi_divergence(close, rsi_series),
     }
 
@@ -316,19 +323,10 @@ def analyze_market(df_15m, df_1h, df_4h, df_1d, symbol, funding_rate=None, reaso
             f"اعتماد {confidence:.1f}% کمتر از حداقل {MIN_SIGNAL_PROBABILITY:.1f}% است."
         )
 
-    # 4H/1D agreement is a regime filter, not an absolute one-way lock.
-    # The previous hard gate forced every signal to follow the higher-timeframe
-    # regime. In a prolonged bear regime this can make the strategy literally
-    # SELL-only, even when a strong 1H reversal is confirmed by 15m momentum.
-    # Keep the regime agreement requirement, but allow a high-quality
-    # counter-trend reversal with a materially higher score threshold.
     regime_direction = "BUY" if bias_4h == "BULL" else "SELL"
-    countertrend = direction != regime_direction
-    countertrend_min_score = max(MIN_SIGNAL_SCORE, 38.0)
-    if countertrend and abs(score) < countertrend_min_score:
+    if direction != regime_direction:
         return _skip(
-            f"سیگنال {direction} خلاف رژیم 4H/1D است و امتیاز {abs(score):.1f} "
-            f"به حد لازم برای بازگشت قدرتمند ({countertrend_min_score:.1f}) نرسیده است."
+            f"جهت کوتاه‌مدت {direction} خلاف رژیم 4H/1D ({regime_direction}) است."
         )
 
     # 15m confirmation: EMA20 slope + close position + MACD direction.
@@ -362,7 +360,7 @@ def analyze_market(df_15m, df_1h, df_4h, df_1d, symbol, funding_rate=None, reaso
     # Use the same signed score for both sides. The old implementation gave
     # the losing side exactly 0% and made the number look like a calibrated
     # probability. We now expose confidence plus a small neutral probability.
-    opposite_score = -abs(score)
+    opposite_score = -score
     buy_conf = confidence if direction == "BUY" else 100 - confidence
     sell_conf = confidence if direction == "SELL" else 100 - confidence
     neutral = max(0.0, 100.0 - max(buy_conf, sell_conf))
