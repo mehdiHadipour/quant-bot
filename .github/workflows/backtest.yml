@@ -11,6 +11,14 @@ on:
         description: "How many days of history to test"
         required: true
         default: "180"
+      atr_sl_multiplier:
+        description: "SL distance = ATR x this (leave as default to use the live bot's current value, 1.8)"
+        required: false
+        default: "1.8"
+      atr_tp_multiplier:
+        description: "TP distance = ATR x this (leave as default to use the live bot's current value, 3.0)"
+        required: false
+        default: "3.0"
 
 permissions:
   contents: read
@@ -39,7 +47,11 @@ jobs:
             --days "${{ inputs.days }}"
 
       - name: Run backtest
+        env:
+          ATR_SL_MULTIPLIER: ${{ inputs.atr_sl_multiplier }}
+          ATR_TP_MULTIPLIER: ${{ inputs.atr_tp_multiplier }}
         run: |
+          echo "Testing with ATR_SL_MULTIPLIER=$ATR_SL_MULTIPLIER, ATR_TP_MULTIPLIER=$ATR_TP_MULTIPLIER"
           python scripts/run_backtest.py \
             --symbols "${{ inputs.symbols }}" \
             --verbose
