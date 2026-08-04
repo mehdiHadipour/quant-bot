@@ -128,7 +128,16 @@ def todays_realized_loss_r(closed_trades, as_of_dt):
     return total
 
 
-def run_portfolio_backtest(symbols, data_dir, verbose=False):
+def run_portfolio_backtest(symbols, data_dir, verbose=False, max_abs_structure_score=None):
+    """max_abs_structure_score: EXPERIMENTAL, backtest-only filter (not
+    wired into the live bot). Tests a hypothesis found by analyzing a
+    real backtest run: trades where |Structure/Breakout| was unusually
+    large were much more likely to reverse before reaching full TP
+    (mean -4.9 to -5.9 for breakeven/partial-lock exits vs -2.8 to -2.9
+    for full wins/losses) — consistent with an extreme reading marking
+    an already-extended/climactic move rather than the start of one. If
+    set, any signal whose |Structure/Breakout| score exceeds this value
+    is skipped entirely, as if analyze_market had returned None."""
     all_frames = {}
     for symbol in symbols:
         try:
@@ -211,6 +220,14 @@ def run_portfolio_backtest(symbols, data_dir, verbose=False):
             if not result:
                 continue
 
+            if max_abs_structure_score is not None:
+                structure_score = (result.get("score_breakdown") or {}).get("Structure/Breakout", 0)
+                if abs(structure_score) > max_abs_structure_score:
+                    if verbose:
+                        print(f"    [{as_of_dt.date()}] {symbol}: \u0631\u062f \u0634\u062f \u0628\u0647\u200c\u062e\u0627\u0637\u0631 \u0627\u0641\u0631\u0627\u0637 Structure/Breakout "
+                              f"({structure_score:+d}, \u0622\u0633\u062a\u0627\u0646\u0647: {max_abs_structure_score})")
+                    continue
+
             direction = result["direction"]
             atr = result["atr"]
             price = float(row_by_time[symbol].loc[as_of_ms]["close"])
@@ -254,11 +271,24 @@ def main():
     parser.add_argument("--fee-r", type=float, default=0.02)
     parser.add_argument("--slippage-r", type=float, default=0.02)
     parser.add_argument("--verbose", action="store_true")
+    parser.add_argument(
+        "--max-abs-structure-score", type=float, default=None,
+        help="EXPERIMENTAL: reject any signal whose |Structure/Breakout| "
+             "score exceeds this value. Tests the hypothesis that an "
+             "unusually strong structure/breakout reading marks an "
+             "already-extended move rather than the start of one. "
+             "Leave unset to disable (default live behavior).",
+    )
     args = parser.parse_args()
 
     symbols = [s.strip() for s in args.symbols.split(",") if s.strip()]
     print(f"\n=== \u0628\u06a9\u200c\u062a\u0633\u062a \u067e\u0631\u062a\u0641\u0648\u06cc \u0645\u0634\u062a\u0631\u06a9: {', '.join(symbols)} ===")
-    all_closed, per_symbol = run_portfolio_backtest(symbols, args.data_dir, verbose=args.verbose)
+    if args.max_abs_structure_score is not None:
+        print(f"(\u0622\u0632\u0645\u0627\u06cc\u0634\u06cc: \u0631\u062f \u0633\u06cc\u06af\u0646\u0627\u0644 \u0627\u06af\u0631 |Structure/Breakout| > {args.max_abs_structure_score})")
+    all_closed, per_symbol = run_portfolio_backtest(
+        symbols, args.data_dir, verbose=args.verbose,
+        max_abs_structure_score=args.max_abs_structure_score,
+    )
 
     if not all_closed:
         print("\n\u0647\u06cc\u0686 \u0645\u0639\u0627\u0645\u0644\u0647\u200c\u0627\u06cc \u062f\u0631 \u06a9\u0644 \u0628\u0627\u0632\u0647\u0654 \u062f\u0627\u062f\u0647 \u0634\u0628\u06cc\u0647\u200c\u0633\u0627\u0632\u06cc \u0646\u0634\u062f.")
