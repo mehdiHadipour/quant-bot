@@ -19,6 +19,10 @@ on:
         description: "TP distance = ATR x this (leave as default to use the live bot's current value, 3.0)"
         required: false
         default: "3.0"
+      max_abs_structure_score:
+        description: "EXPERIMENTAL: reject signals whose |Structure/Breakout| score exceeds this (leave EMPTY to disable)"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -52,9 +56,13 @@ jobs:
           ATR_TP_MULTIPLIER: ${{ inputs.atr_tp_multiplier }}
         run: |
           echo "Testing with ATR_SL_MULTIPLIER=$ATR_SL_MULTIPLIER, ATR_TP_MULTIPLIER=$ATR_TP_MULTIPLIER"
+          EXTRA_ARGS=""
+          if [ -n "${{ inputs.max_abs_structure_score }}" ]; then
+            EXTRA_ARGS="--max-abs-structure-score ${{ inputs.max_abs_structure_score }}"
+          fi
           python scripts/run_backtest.py \
             --symbols "${{ inputs.symbols }}" \
-            --verbose
+            --verbose $EXTRA_ARGS
 
       - name: Upload results
         if: always()
