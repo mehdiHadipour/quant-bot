@@ -1,0 +1,99 @@
+name: Quant Bot - Safe Trading Cycle
+
+on:
+  schedule:
+    # 10-minute cadence: this repo is Public (unlimited free Actions
+    # minutes), so the private-repo minute-budget reasoning for 15min
+    # doesn't apply here — kept at the previously-requested 10min, offset
+    # to avoid the top-of-hour scheduling contention window.
+    # v27.4 (restored): fires every 5 minutes as a heartbeat — main.py
+    # itself decides whether enough real time (CYCLE_MINUTES) has passed
+    # to do any actual work, exiting in ~1-2s otherwise. See
+    # should_skip_cycle_early() in main.py.
+    - cron: "2-59/5 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: quant-bot-cycle
+  cancel-in-progress: false
+
+jobs:
+  trading_bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Static validation
+        run: python scripts/validate_project.py
+      - name: Lint
+        run: |
+          pip install ruff --quiet
+          ruff check .
+      - name: Generate ephemeral test encryption key
+        run: echo "ENCRYPTION_KEY=$(python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')" >> "$GITHUB_ENV"
+      - name: Run tests
+        env:
+          TELEGRAM_TOKEN: test-token
+          TELEGRAM_CHAT: test-chat
+        run: python -m unittest discover -s tests -t . -v
+      - name: Run Quant Engine
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT: ${{ secrets.TELEGRAM_CHAT }}
+          ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
+          SYMBOLS: ${{ vars.SYMBOLS || 'BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT,XRPUSDT,ADAUSDT,DOGEUSDT,AVAXUSDT,LINKUSDT,DOTUSDT,ZECUSDT,SUIUSDT,TONUSDT,NEARUSDT,XAUUSDT,XAGUSDT,CLUSDT,NATGASUSDT' }}
+          MIN_SIGNAL_PROBABILITY: ${{ vars.MIN_SIGNAL_PROBABILITY }}
+          MIN_ADX: ${{ vars.MIN_ADX }}
+          ATR_SL_MULTIPLIER: ${{ vars.ATR_SL_MULTIPLIER }}
+          ATR_TP_MULTIPLIER: ${{ vars.ATR_TP_MULTIPLIER }}
+          RISK_PERCENT_PER_TRADE: ${{ vars.RISK_PERCENT_PER_TRADE }}
+          SL_WARNING_THRESHOLD: ${{ vars.SL_WARNING_THRESHOLD }}
+          SYMBOL_COOLDOWN_CYCLES: ${{ vars.SYMBOL_COOLDOWN_CYCLES }}
+          CYCLE_MINUTES: ${{ vars.CYCLE_MINUTES }}
+          TRAILING_TRIGGER_R: ${{ vars.TRAILING_TRIGGER_R }}
+          PARTIAL_LOCK_TRIGGER_R: ${{ vars.PARTIAL_LOCK_TRIGGER_R }}
+          PARTIAL_LOCK_R: ${{ vars.PARTIAL_LOCK_R }}
+          MAX_CONCURRENT_TRADES: ${{ vars.MAX_CONCURRENT_TRADES }}
+          MAX_DAILY_LOSS_R: ${{ vars.MAX_DAILY_LOSS_R }}
+          MAX_OPEN_RISK_R: ${{ vars.MAX_OPEN_RISK_R }}
+          MIN_REWARD_RISK: ${{ vars.MIN_REWARD_RISK }}
+          MAX_SAME_DIRECTION_OPEN: ${{ vars.MAX_SAME_DIRECTION_OPEN }}
+          MAX_OPEN_PER_MARKET_GROUP: ${{ vars.MAX_OPEN_PER_MARKET_GROUP || '2' }}
+          DIVERSIFICATION_ENABLED: ${{ vars.DIVERSIFICATION_ENABLED || 'true' }}
+          ADAPTIVE_TREND_ENABLED: ${{ vars.ADAPTIVE_TREND_ENABLED || 'true' }}
+          ADAPTIVE_FAST_EMA: ${{ vars.ADAPTIVE_FAST_EMA || '6' }}
+          ADAPTIVE_SLOW_EMA: ${{ vars.ADAPTIVE_SLOW_EMA || '18' }}
+          ADAPTIVE_TARGET_VOL: ${{ vars.ADAPTIVE_TARGET_VOL || '0.20' }}
+          ADAPTIVE_MAX_ASSET_WEIGHT: ${{ vars.ADAPTIVE_MAX_ASSET_WEIGHT || '1.0' }}
+          ADAPTIVE_MIN_RV: ${{ vars.ADAPTIVE_MIN_RV || '0.10' }}
+          ADAPTIVE_MAX_RV: ${{ vars.ADAPTIVE_MAX_RV || '2.0' }}
+        run: python main.py
+      - name: Persist state and history
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for f in state/state.json.enc state/state.json.enc.bak data/history.csv.enc; do
+            [ -f "$f" ] && git add -f "$f"
+          done
+          # v27.3: history.csv is now migrated to history.csv.enc on first
+          # run; explicitly stage the deletion of the old plaintext file
+          # if main.py already removed it locally, so it actually
+          # disappears from the repo instead of lingering in git history
+          # going forward (it stays in past commits either way — rotate
+          # ENCRYPTION_KEY if that old plaintext exposure is a concern).
+          if [ ! -f "data/history.csv" ]; then
+            git rm --cached --ignore-unmatch -q data/history.csv || true
+          fi
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: persist bot state [skip ci]"
+            git push
+          fi
