@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 import pandas as pd
 import numpy as np
 
@@ -128,7 +129,18 @@ class TestAnalyzeMarket(unittest.TestCase):
         setup (not just a flipped sign on paper) and requires that it
         produces a SELL signal with a probability comparable to the
         equivalent bullish case. If this test ever fails, suspect the sign
-        in the buy_prob/sell_prob sigmoid formulas first."""
+        in the buy_prob/sell_prob sigmoid formulas first.
+
+        This test predates ADAPTIVE_TREND_ENABLED and specifically checks
+        the LEGACY scoring engine's buy/sell probability math (which the
+        AdaptiveTrend path doesn't even have — it returns a binary 100/0,
+        no per-factor sigmoid). It must force the legacy path via
+        ADAPTIVE_TREND_ENABLED=False regardless of the configured default,
+        or its perfectly deterministic, noise-free synthetic data (~0
+        realized volatility) fails the AdaptiveTrend volatility floor and
+        returns None before ever reaching the code this test checks —
+        which is exactly what happened when ADAPTIVE_TREND_ENABLED's
+        default changed to True without this test being updated."""
         n = 250
         up = pd.Series([100 + i * 0.5 for i in range(n)])
         up.iloc[-1] = up.iloc[-2] + 5  # breakout candle
@@ -141,8 +153,9 @@ class TestAnalyzeMarket(unittest.TestCase):
         df_up = pd.DataFrame({"open": up, "close": up, "high": up + 1, "low": up - 1, "volume": vol, "taker_buy_volume": vol * 0.5})
         df_down = pd.DataFrame({"open": down, "close": down, "high": down + 1, "low": down - 1, "volume": vol, "taker_buy_volume": vol * 0.5})
 
-        res_buy = analyze_market(df_up, df_up, df_up, df_up, "TESTUSDT")
-        res_sell = analyze_market(df_down, df_down, df_down, df_down, "TESTUSDT")
+        with patch("indicators.ADAPTIVE_TREND_ENABLED", False):
+            res_buy = analyze_market(df_up, df_up, df_up, df_up, "TESTUSDT")
+            res_sell = analyze_market(df_down, df_down, df_down, df_down, "TESTUSDT")
 
         self.assertIsNotNone(res_buy, "a clean uptrend + breakout should produce a BUY signal")
         self.assertEqual(res_buy["direction"], "BUY")
