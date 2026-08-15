@@ -209,17 +209,41 @@ def analyze_market(df_15m, df_1h, df_4h, df_1d, symbol, funding_rate=None, reaso
         # (backtest_results.csv): the AdaptiveTrend path previously had NO
         # trend-strength filter at all, only the volatility-regime bounds
         # above. A bare EMA(6)/EMA(18) crossover flips direction on every
-        # wiggle in a genuinely trendless/choppy market, which is a
-        # plausible mechanical explanation for that backtest's ~14% win
-        # rate (needed ~19% to break even at this SL/TP ratio) — the
-        # legacy scoring path already requires ADX >= MIN_ADX for exactly
-        # this reason, but the AdaptiveTrend path never did.
-        # IMPORTANT: this is a plausible, reasoned fix for an identified
-        # gap, not a guarantee — re-run scripts/run_backtest.py against
-        # this change to see its actual effect on your data before
-        # trusting it with real capital.
-        if adx < MIN_ADX:
-            return _skip(f"AdaptiveTrend: ADX {adx:.1f} < حداقل {MIN_ADX:.1f} — روند به‌اندازهٔ کافی قوی نیست")
+        # wiggle in a genuinely trendless/choppy market. The legacy
+        # scoring path already requires ADX >= MIN_ADX for exactly this
+        # reason, but the AdaptiveTrend path never did.
+        #
+        # BUG FIX (found by re-running the backtest after the first
+        # attempt at this fix barely moved the win rate: 13.7% -> 13.3%,
+        # nowhere near enough): the first version of this gate reused the
+        # module-level `adx` variable, which is computed from `df` — the
+        # 1H timeframe. But this signal's direction comes entirely from
+        # 4H EMAs (fast_a/slow_a above); filtering a 4H trend decision by
+        # 1H trend strength is a timeframe mismatch — 1H can look choppy
+        # while 4H is genuinely trending, and vice versa, so the filter
+        # wasn't actually screening the thing that matters. Computing ADX
+        # on df_4h instead, to match the timeframe the direction itself
+        # comes from.
+        # IMPORTANT: still a reasoned hypothesis, not a guarantee — this
+        # is now the SECOND attempt at addressing the same backtest
+        # finding, which is itself evidence that fixing this kind of
+        # strategy issue by inspection alone is unreliable. Re-run
+        # scripts/run_backtest.py after this change and compare the win
+        # rate/expectancy again before trusting it with real capital. If
+        # this still doesn't move the win rate meaningfully, the more
+        # likely explanation is that a bare EMA(6)/EMA(18) crossover
+        # doesn't have a viable edge on these instruments/period at all,
+        # regardless of which timeframe's ADX gates it — at that point,
+        # the fix that actually needs testing is adding real confirmation
+        # (e.g. the same 15m+1H+4H+1D multi-timeframe confluence the
+        # legacy path already uses), not another single-filter tweak.
+        adx_4h = ta.trend.ADXIndicator(
+            high=df_4h["high"], low=df_4h["low"], close=df_4h["close"], window=14
+        ).adx().iloc[-1]
+        if pd.isna(adx_4h):
+            return _skip("AdaptiveTrend: ADX چهارساعته قابل محاسبه نبود")
+        if adx_4h < MIN_ADX:
+            return _skip(f"AdaptiveTrend: ADX چهارساعته {adx_4h:.1f} < حداقل {MIN_ADX:.1f} — روند به‌اندازهٔ کافی قوی نیست")
         adaptive_direction = "BUY" if fast_a > slow_a else "SELL"
         adaptive_weight = min(ADAPTIVE_TARGET_VOL / max(rv_4h, 1e-9), ADAPTIVE_MAX_ASSET_WEIGHT)
         return {
