@@ -208,10 +208,17 @@ class TestAdaptiveTrendPathDoesNotCrash(unittest.TestCase):
             "volume": rng.uniform(100, 200, n),
             "taker_buy_volume": rng.uniform(40, 100, n),
         })
-        try:
-            result = analyze_market(df, df, df, df, "TESTUSDT")
-        except NameError as e:
-            self.fail(f"AdaptiveTrend path raised NameError (undefined variable): {e}")
+        # This test's only job is to prove the AdaptiveTrend success path
+        # doesn't crash — not to also satisfy the ADX trend-strength gate
+        # added after the backtest review (real bugs found there get their
+        # own dedicated test below). Patch MIN_ADX to 0 so mildly-trending
+        # random-walk noise reliably reaches the return statement instead
+        # of being (validly, separately) skipped for a weak trend.
+        with patch("indicators.MIN_ADX", 0.0):
+            try:
+                result = analyze_market(df, df, df, df, "TESTUSDT")
+            except NameError as e:
+                self.fail(f"AdaptiveTrend path raised NameError (undefined variable): {e}")
         # Realized volatility from this noise profile should clear
         # ADAPTIVE_MIN_RV, so a signal (not a None skip) is expected here —
         # if this assertion itself ever fails, the noise parameters above
@@ -221,6 +228,59 @@ class TestAdaptiveTrendPathDoesNotCrash(unittest.TestCase):
         self.assertIn(result["direction"], ("BUY", "SELL"))
         for key in ("buy_ratio", "liquidity_sweep", "divergence"):
             self.assertIn(key, result)
+
+
+class TestAdaptiveTrendAdxGate(unittest.TestCase):
+    """Regression test for a real finding from reviewing an actual
+    backtest run: the AdaptiveTrend path (the default strategy) had NO
+    trend-strength filter at all — only the realized-volatility regime
+    bounds. A bare EMA(6)/EMA(18) crossover with no trend-quality gate
+    flips direction on every wiggle in a choppy market, a plausible
+    mechanical explanation for that backtest's ~14% win rate (needed
+    ~19% to break even at the configured SL/TP ratio). The legacy
+    scoring path already required ADX >= MIN_ADX for this exact reason;
+    AdaptiveTrend now does too."""
+
+    def test_weak_trend_is_skipped_even_with_valid_volatility(self):
+        # A random-walk with no drift and small, noisy candles: enough
+        # movement to clear the volatility-regime bounds, but with no
+        # sustained direction, so ADX should come out low.
+        rng = np.random.default_rng(3)
+        n = 260
+        close = 100 + np.cumsum(rng.normal(0.0, 0.6, n))
+        df = pd.DataFrame({
+            "open": close - 0.1,
+            "high": close + np.abs(rng.normal(0.5, 0.2, n)),
+            "low": close - np.abs(rng.normal(0.5, 0.2, n)),
+            "close": close,
+            "volume": rng.uniform(100, 200, n),
+            "taker_buy_volume": rng.uniform(40, 100, n),
+        })
+        reasons = []
+        result = analyze_market(df, df, df, df, "TESTUSDT", reasons=reasons)
+        if result is not None:
+            self.skipTest("this seed's random walk happened to trend strongly enough to clear ADX; not a failure")
+        self.assertTrue(any("ADX" in r for r in reasons))
+
+    def test_strong_deterministic_trend_still_produces_a_signal(self):
+        # A clean, strongly trending series (small noise layered on a
+        # steep slope) should clear BOTH the volatility bounds AND the
+        # new ADX gate — proving the gate doesn't block genuinely
+        # trending markets, only choppy ones.
+        rng = np.random.default_rng(5)
+        n = 260
+        close = 100 + np.arange(n) * 0.8 + rng.normal(0, 0.6, n)
+        df = pd.DataFrame({
+            "open": close - 0.1,
+            "high": close + np.abs(rng.normal(0.5, 0.2, n)),
+            "low": close - np.abs(rng.normal(0.5, 0.2, n)),
+            "close": close,
+            "volume": rng.uniform(100, 200, n),
+            "taker_buy_volume": rng.uniform(40, 100, n),
+        })
+        result = analyze_market(df, df, df, df, "TESTUSDT")
+        self.assertIsNotNone(result)
+        self.assertEqual(result["direction"], "BUY")
 
 
 class TestFundingRateScoring(unittest.TestCase):
