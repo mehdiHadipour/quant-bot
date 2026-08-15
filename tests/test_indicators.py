@@ -282,6 +282,51 @@ class TestAdaptiveTrendAdxGate(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(result["direction"], "BUY")
 
+    def test_uses_4h_adx_not_1h_adx(self):
+        """Regression test for the actual bug in the first version of this
+        gate: it computed ADX from the 1H frame while the signal's
+        direction comes entirely from 4H EMAs — a timeframe mismatch that,
+        per a real backtest re-run, barely moved the win rate (13.7% ->
+        13.3%) despite cutting trade volume by 30%. Proven here directly:
+        build a 1H frame that's choppy (weak 1H ADX) paired with a 4H
+        frame that's cleanly trending (strong 4H ADX) — the signal must
+        still fire, because the gate is supposed to check the 4H trend
+        the direction is actually based on, not the unrelated 1H one."""
+        rng = np.random.default_rng(11)
+        n = 260
+
+        # 1H: choppy, no sustained direction (weak 1H ADX).
+        close_1h = 100 + np.cumsum(rng.normal(0.0, 0.6, n))
+        df_1h = pd.DataFrame({
+            "open": close_1h - 0.1,
+            "high": close_1h + np.abs(rng.normal(0.5, 0.2, n)),
+            "low": close_1h - np.abs(rng.normal(0.5, 0.2, n)),
+            "close": close_1h,
+            "volume": rng.uniform(100, 200, n),
+            "taker_buy_volume": rng.uniform(40, 100, n),
+        })
+
+        # 4H: cleanly trending (strong 4H ADX) — this is what the
+        # AdaptiveTrend direction and the fixed gate should actually key
+        # off of.
+        close_4h = 100 + np.arange(n) * 0.8 + rng.normal(0, 0.6, n)
+        df_4h = pd.DataFrame({
+            "open": close_4h - 0.1,
+            "high": close_4h + np.abs(rng.normal(0.5, 0.2, n)),
+            "low": close_4h - np.abs(rng.normal(0.5, 0.2, n)),
+            "close": close_4h,
+            "volume": rng.uniform(100, 200, n),
+            "taker_buy_volume": rng.uniform(40, 100, n),
+        })
+
+        result = analyze_market(df_1h, df_1h, df_4h, df_1h, "TESTUSDT")
+        self.assertIsNotNone(
+            result,
+            "signal was blocked despite a strongly trending 4H frame — "
+            "the gate is (still) checking the wrong timeframe's ADX",
+        )
+        self.assertEqual(result["direction"], "BUY")
+
 
 class TestFundingRateScoring(unittest.TestCase):
     """funding_rate is a contrarian, modest-weight, fail-open input: it
