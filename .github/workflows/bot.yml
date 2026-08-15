@@ -26,25 +26,76 @@ jobs:
     timeout-minutes: 8
     steps:
       - uses: actions/checkout@v6
+      
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: "pip"
+      
       - name: Install dependencies
         run: pip install -r requirements.txt
+      
       - name: Static validation
         run: python scripts/validate_project.py
+      
       - name: Lint
         run: |
           pip install ruff --quiet
           ruff check .
+      
       - name: Generate ephemeral test encryption key
         run: echo "ENCRYPTION_KEY=$(python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')" >> "$GITHUB_ENV"
+      
       - name: Run tests
         env:
           TELEGRAM_TOKEN: test-token
           TELEGRAM_CHAT: test-chat
         run: python -m unittest discover -s tests -t . -v
+      
+      - name: Test Telegram Connection
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT: ${{ secrets.TELEGRAM_CHAT }}
+        run: |
+          python -c "
+import os, requests, sys, json
+token = os.getenv('TELEGRAM_TOKEN')
+chat = os.getenv('TELEGRAM_CHAT')
+
+print('=' * 50)
+print('📱 TESTING TELEGRAM CONNECTION')
+print('=' * 50)
+print(f'Token: {token[:15]}...' if token else '❌ Token: NOT SET')
+print(f'Chat ID: {chat}' if chat else '❌ Chat ID: NOT SET')
+print('-' * 50)
+
+if not token or not chat:
+    print('❌ Secrets تنظیم نشده!')
+    print('لطفاً TELEGRAM_TOKEN و TELEGRAM_CHAT را در Settings > Secrets تنظیم کنید.')
+    sys.exit(1)
+
+try:
+    url = f'https://api.telegram.org/bot{token}/sendMessage'
+    payload = {
+        'chat_id': chat, 
+        'text': '✅ ربات با موفقیت متصل شد! زمان: ' + str(__import__('datetime').datetime.now())
+    }
+    print('📤 ارسال درخواست...')
+    r = requests.post(url, data=payload, timeout=15)
+    print(f'📥 Status Code: {r.status_code}')
+    print(f'📄 Response: {r.text}')
+    print('-' * 50)
+    if r.status_code == 200:
+        print('✅ پیام با موفقیت به تلگرام ارسال شد! 🎉')
+        sys.exit(0)
+    else:
+        print(f'❌ خطا در ارسال: {r.text}')
+        sys.exit(1)
+except Exception as e:
+    print(f'❌ خطا: {e}')
+    sys.exit(1)
+"
+      
       - name: Run Quant Engine
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
@@ -77,6 +128,7 @@ jobs:
           ADAPTIVE_MIN_RV: ${{ vars.ADAPTIVE_MIN_RV || '0.10' }}
           ADAPTIVE_MAX_RV: ${{ vars.ADAPTIVE_MAX_RV || '2.0' }}
         run: python main.py
+      
       - name: Persist state and history
         run: |
           git config user.name "github-actions[bot]"
@@ -84,12 +136,6 @@ jobs:
           for f in state/state.json.enc state/state.json.enc.bak data/history.csv.enc; do
             [ -f "$f" ] && git add -f "$f"
           done
-          # v27.3: history.csv is now migrated to history.csv.enc on first
-          # run; explicitly stage the deletion of the old plaintext file
-          # if main.py already removed it locally, so it actually
-          # disappears from the repo instead of lingering in git history
-          # going forward (it stays in past commits either way — rotate
-          # ENCRYPTION_KEY if that old plaintext exposure is a concern).
           if [ ! -f "data/history.csv" ]; then
             git rm --cached --ignore-unmatch -q data/history.csv || true
           fi
