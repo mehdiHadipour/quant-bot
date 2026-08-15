@@ -205,6 +205,21 @@ def analyze_market(df_15m, df_1h, df_4h, df_1d, symbol, funding_rate=None, reaso
             return _skip(f"AdaptiveTrend: نوسان سالانه {rv_4h:.2f} < حداقل {ADAPTIVE_MIN_RV:.2f}")
         if rv_4h > ADAPTIVE_MAX_RV:
             return _skip(f"AdaptiveTrend: نوسان سالانه {rv_4h:.2f} > حداکثر {ADAPTIVE_MAX_RV:.2f}")
+        # Trend-quality gate — added after reviewing a real backtest
+        # (backtest_results.csv): the AdaptiveTrend path previously had NO
+        # trend-strength filter at all, only the volatility-regime bounds
+        # above. A bare EMA(6)/EMA(18) crossover flips direction on every
+        # wiggle in a genuinely trendless/choppy market, which is a
+        # plausible mechanical explanation for that backtest's ~14% win
+        # rate (needed ~19% to break even at this SL/TP ratio) — the
+        # legacy scoring path already requires ADX >= MIN_ADX for exactly
+        # this reason, but the AdaptiveTrend path never did.
+        # IMPORTANT: this is a plausible, reasoned fix for an identified
+        # gap, not a guarantee — re-run scripts/run_backtest.py against
+        # this change to see its actual effect on your data before
+        # trusting it with real capital.
+        if adx < MIN_ADX:
+            return _skip(f"AdaptiveTrend: ADX {adx:.1f} < حداقل {MIN_ADX:.1f} — روند به‌اندازهٔ کافی قوی نیست")
         adaptive_direction = "BUY" if fast_a > slow_a else "SELL"
         adaptive_weight = min(ADAPTIVE_TARGET_VOL / max(rv_4h, 1e-9), ADAPTIVE_MAX_ASSET_WEIGHT)
         return {
