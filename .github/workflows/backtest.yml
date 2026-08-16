@@ -16,9 +16,9 @@ on:
         required: false
         default: "1.8"
       atr_tp_multiplier:
-        description: "TP distance = ATR x this (leave as default to use the live bot's current value, 3.0)"
+        description: "TP distance = ATR x this (leave as default to use the live bot's current value, 1.8 — a 1:1 reward:risk; was 3.0 before V27.17's backtest-driven recalibration)"
         required: false
-        default: "3.0"
+        default: "1.8"
       max_abs_structure_score:
         description: "EXPERIMENTAL: reject signals whose |Structure/Breakout| score exceeds this (leave EMPTY to disable)"
         required: false
