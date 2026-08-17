@@ -20,6 +20,7 @@ import pandas as pd
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts"))
 import run_backtest as rb
 import config
+import trade_monitor
 
 
 def _write_flat_data(data_dir, symbols, n=400, price=100.0):
@@ -66,6 +67,15 @@ class PortfolioGatesTests(unittest.TestCase):
         self._orig_max_same_direction = config.MAX_SAME_DIRECTION_OPEN
         self._orig_max_daily_loss = config.MAX_DAILY_LOSS_R
         self._orig_min_rr = config.MIN_REWARD_RISK
+        self._orig_time_stop_schedule = trade_monitor.TIME_STOP_SCHEDULE
+        # These gate tests use synthetic, sometimes long-flat-then-jump
+        # price timelines to isolate ONE specific gate (max concurrent,
+        # daily loss, etc.) — a flat pre-move period can otherwise trip
+        # the graduated time-stop (V27.19) before the gate being tested
+        # ever gets exercised, which is a real interaction between two
+        # real features, not a bug in either; disabled here so each test
+        # in this class stays isolated to the single mechanism it names.
+        trade_monitor.TIME_STOP_SCHEDULE = []
 
     def tearDown(self):
         shutil.rmtree(self.tmp_dir, ignore_errors=True)
@@ -74,6 +84,7 @@ class PortfolioGatesTests(unittest.TestCase):
         config.MAX_SAME_DIRECTION_OPEN = self._orig_max_same_direction
         config.MAX_DAILY_LOSS_R = self._orig_max_daily_loss
         config.MIN_REWARD_RISK = self._orig_min_rr
+        trade_monitor.TIME_STOP_SCHEDULE = self._orig_time_stop_schedule
 
     def test_max_concurrent_trades_enforced_across_symbols(self):
         symbols = ["AAAUSDT", "BBBUSDT", "CCCUSDT", "DDDUSDT"]
