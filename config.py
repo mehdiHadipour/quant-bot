@@ -102,6 +102,21 @@ SL_WARNING_THRESHOLD = _bounded_float_env("SL_WARNING_THRESHOLD", 0.8, 0.0, 1.0)
 TRAILING_TRIGGER_R = _bounded_float_env("TRAILING_TRIGGER_R", 0.5, 0.0, 1.0)
 PARTIAL_LOCK_TRIGGER_R = _bounded_float_env("PARTIAL_LOCK_TRIGGER_R", 0.75, 0.0, 1.0)
 PARTIAL_LOCK_R = _bounded_float_env("PARTIAL_LOCK_R", 0.5, 0.0, 10.0)
+# Time-stop — added after a real backtest showed a genuinely strong,
+# validated pattern (unlike several other tested-and-rejected ideas: entry
+# freshness, order-flow/CVD agreement, RSI extremity, distance from EMA,
+# and a wider SL/TP all showed ~zero correlation with outcome on real
+# data). Trades still under TIME_STOP_MIN_PROGRESS_R progress toward TP
+# after TIME_STOP_HOURS averaged a real, final -0.33R outcome (32.5% win
+# rate); trades that HAD reached that much progress by then averaged
+# +0.42R (64.4% win rate) — a much larger, cleaner split than anything
+# else tested. Interpreted as: fast resolution (either way) reflects
+# market conviction; trades that just drift sideways for hours tend to
+# keep drifting into a loss rather than recover. Re-validated with a real
+# backtest re-run after implementing (see release notes) — not just this
+# correlation check.
+TIME_STOP_HOURS = _bounded_float_env("TIME_STOP_HOURS", 8.0, 0.0, 10000.0)
+TIME_STOP_MIN_PROGRESS_R = _bounded_float_env("TIME_STOP_MIN_PROGRESS_R", 0.3, -10.0, 10.0)
 CYCLE_MINUTES = _positive_int_env("CYCLE_MINUTES", 10, minimum=1)
 SILENCE_GAP_MULTIPLIER = _bounded_float_env("SILENCE_GAP_MULTIPLIER", 6.0, 1.0, 100.0)
 SYMBOL_COOLDOWN_CYCLES = _positive_int_env("SYMBOL_COOLDOWN_CYCLES", 6, minimum=0)
