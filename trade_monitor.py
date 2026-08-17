@@ -1,6 +1,9 @@
 from datetime import datetime, timezone, timedelta
 
-from config import SL_WARNING_THRESHOLD, SYMBOL_COOLDOWN_CYCLES, TRAILING_TRIGGER_R, CYCLE_MINUTES, PARTIAL_LOCK_TRIGGER_R, PARTIAL_LOCK_R
+from config import (
+    SL_WARNING_THRESHOLD, SYMBOL_COOLDOWN_CYCLES, TRAILING_TRIGGER_R, CYCLE_MINUTES,
+    PARTIAL_LOCK_TRIGGER_R, PARTIAL_LOCK_R, TIME_STOP_HOURS, TIME_STOP_MIN_PROGRESS_R,
+)
 from logger import log
 
 
@@ -143,6 +146,83 @@ def check_trailing_stop(state, current_high, current_low, symbol):
     return moved
 
 
+def check_time_stop(state, current_close, symbol, as_of=None):
+    """Closes trades that have been open longer than TIME_STOP_HOURS
+    without reaching TIME_STOP_MIN_PROGRESS_R progress toward TP —
+    added after a real backtest showed this specific pattern (unlike
+    several other tested-and-rejected ideas) has real predictive power:
+    trades still stalled at that point went on to average a real -0.33R
+    final outcome, versus +0.42R for trades that had already made that
+    much progress by then. See config.py's TIME_STOP_HOURS comment for
+    the full validation.
+
+    Disabled (a no-op, returns []) when TIME_STOP_HOURS <= 0 — matches
+    the fail-open/opt-out pattern other optional guards in this codebase
+    already use (e.g. MAX_OPEN_PER_MARKET_GROUP).
+
+    Uses `current_close`, not the candle's favorable extreme, to
+    determine progress — deliberately different from
+    check_trailing_stop()'s use of high/low. That function asks "did
+    price EVER reach this level" (so a brief favorable spike is never
+    missed); this one asks "where does price actually stand right now"
+    (matching exactly how this pattern was measured against real trade
+    data before being implemented — using the close, not the best-ever
+    excursion, since a trade that spiked favorably and fully round-tripped
+    back down is not meaningfully different from one that never spiked at
+    all, for the purpose of this specific check).
+
+    A time-stopped trade's `result` is "TIME_STOP", distinct from
+    "WIN"/"LOSS", so `update_circuit_breaker` and reporting can tell it
+    apart from an organic SL/TP hit — a time-stop exit's R-multiple can
+    land anywhere (small win, breakeven, or small loss), unlike a LOSS
+    (always the SL distance) or a WIN (always the TP distance).
+
+    Returns the list of closed trade dicts (already updated in `state`),
+    matching check_open_trades()'s return shape.
+    """
+    if TIME_STOP_HOURS <= 0:
+        return []
+
+    now = as_of or datetime.now(timezone.utc)
+    remaining_trades = []
+    closed_trades = []
+    for trade in state.get("trades", []):
+        if trade.get("status") != "open" or trade["symbol"] != symbol:
+            remaining_trades.append(trade)
+            continue
+
+        opened_at = trade.get("time")
+        initial_risk = trade.get("initial_risk")
+        if not opened_at or not initial_risk or initial_risk <= 0:
+            remaining_trades.append(trade)  # can't evaluate age/progress — leave it alone
+            continue
+
+        age_hours = (now - datetime.fromisoformat(opened_at)).total_seconds() / 3600.0
+        if age_hours < TIME_STOP_HOURS:
+            remaining_trades.append(trade)
+            continue
+
+        entry = trade["entry"]
+        if trade["direction"] == "BUY":
+            progress_r = (current_close - entry) / initial_risk
+        else:
+            progress_r = (entry - current_close) / initial_risk
+
+        if progress_r >= TIME_STOP_MIN_PROGRESS_R:
+            remaining_trades.append(trade)  # made enough progress — let it keep running
+            continue
+
+        trade["status"] = "closed"
+        trade["result"] = "TIME_STOP"
+        trade["exit_price"] = current_close
+        trade["exit_time"] = now.isoformat()
+        trade["r_multiple"] = progress_r
+        closed_trades.append(trade)
+
+    state["trades"] = remaining_trades
+    return closed_trades
+
+
 def check_sl_warnings(state, current_high, current_low, current_close, symbol):
     """Return open trades that just crossed into the 'near SL' danger zone
     for the first time (default: 80% of the way from entry to SL), checked
@@ -214,6 +294,16 @@ def update_circuit_breaker(state, closed_trades, as_of=None):
             stats["gross_profit_r"] = stats.get("gross_profit_r", 0.0) + r
         elif r < 0:
             stats["gross_loss_r"] = stats.get("gross_loss_r", 0.0) + abs(r)
+
+        # A TIME_STOP exit (see check_time_stop) doesn't have a natural
+        # WIN/LOSS binary the way an SL/TP hit does, so it's folded into
+        # the existing streak/cooldown logic by the SIGN of its actual
+        # r_multiple — consistent with the fact that an SL-hit already
+        # sometimes lands at r=0 (a breakeven-protected stop) while still
+        # counting as a "LOSS" here. A profitable time-stop behaves like
+        # a WIN; a losing or breakeven one behaves like a LOSS.
+        if result == "TIME_STOP":
+            result = "WIN" if r > 0 else "LOSS"
 
         if result == "WIN":
             stats["wins"] += 1
