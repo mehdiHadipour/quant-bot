@@ -704,7 +704,7 @@ def process_symbol(state, symbol, klines_for_symbol, counters):
     # (checked second, deliberately — an organic TP/SL hit always takes
     # priority over a time-based exit for the same trade/candle). See
     # trade_monitor.check_time_stop's docstring and config.py's
-    # TIME_STOP_HOURS comment for why this exists and how it was validated
+    # TIME_STOP_SCHEDULE comment for why this exists and how it was validated
     # against real backtest data before being added.
     closed_trades += check_time_stop(state, current_close, symbol)
 
