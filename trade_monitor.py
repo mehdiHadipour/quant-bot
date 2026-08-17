@@ -2,7 +2,7 @@ from datetime import datetime, timezone, timedelta
 
 from config import (
     SL_WARNING_THRESHOLD, SYMBOL_COOLDOWN_CYCLES, TRAILING_TRIGGER_R, CYCLE_MINUTES,
-    PARTIAL_LOCK_TRIGGER_R, PARTIAL_LOCK_R, TIME_STOP_HOURS, TIME_STOP_MIN_PROGRESS_R,
+    PARTIAL_LOCK_TRIGGER_R, PARTIAL_LOCK_R, TIME_STOP_SCHEDULE,
 )
 from logger import log
 
@@ -147,18 +147,24 @@ def check_trailing_stop(state, current_high, current_low, symbol):
 
 
 def check_time_stop(state, current_close, symbol, as_of=None):
-    """Closes trades that have been open longer than TIME_STOP_HOURS
-    without reaching TIME_STOP_MIN_PROGRESS_R progress toward TP —
-    added after a real backtest showed this specific pattern (unlike
-    several other tested-and-rejected ideas) has real predictive power:
-    trades still stalled at that point went on to average a real -0.33R
-    final outcome, versus +0.42R for trades that had already made that
-    much progress by then. See config.py's TIME_STOP_HOURS comment for
-    the full validation.
+    """Closes trades that, at their current age, haven't reached the
+    minimum R-progress toward TP required by the LATEST checkpoint in
+    TIME_STOP_SCHEDULE they've already passed — a graduated decay
+    (V27.19) replacing V27.18's single (8h, 0.3R) threshold, generalizing
+    it the way NostalgiaForInfinity's (a widely-used Freqtrade strategy)
+    time-based ROI table does: the bar a trade must clear to justify
+    staying open rises as it ages.
 
-    Disabled (a no-op, returns []) when TIME_STOP_HOURS <= 0 — matches
-    the fail-open/opt-out pattern other optional guards in this codebase
-    already use (e.g. MAX_OPEN_PER_MARKET_GROUP).
+    Both checkpoints in the default schedule are independently
+    backtest-validated: at 4h, trades under 0.10R progress averaged a
+    real -0.35R final outcome vs +0.29R for trades that had reached it;
+    at 8h, under 0.30R averaged -0.33R vs +0.42R. See config.py's
+    TIME_STOP_SCHEDULE comment for why the schedule stops at 8h rather
+    than extending further.
+
+    Disabled (a no-op, returns []) when TIME_STOP_SCHEDULE is empty —
+    matches the fail-open/opt-out pattern other optional guards in this
+    codebase already use (e.g. MAX_OPEN_PER_MARKET_GROUP).
 
     Uses `current_close`, not the candle's favorable extreme, to
     determine progress — deliberately different from
@@ -180,7 +186,7 @@ def check_time_stop(state, current_close, symbol, as_of=None):
     Returns the list of closed trade dicts (already updated in `state`),
     matching check_open_trades()'s return shape.
     """
-    if TIME_STOP_HOURS <= 0:
+    if not TIME_STOP_SCHEDULE:
         return []
 
     now = as_of or datetime.now(timezone.utc)
@@ -198,17 +204,32 @@ def check_time_stop(state, current_close, symbol, as_of=None):
             continue
 
         age_hours = (now - datetime.fromisoformat(opened_at)).total_seconds() / 3600.0
-        if age_hours < TIME_STOP_HOURS:
+
+        # The latest checkpoint whose hour threshold has already passed —
+        # TIME_STOP_SCHEDULE is kept sorted ascending by hour (see
+        # config._parse_time_stop_schedule), so this is the last one
+        # with hours <= age_hours, i.e. the most demanding one that
+        # currently applies. None if the trade hasn't reached even the
+        # first checkpoint yet.
+        applicable_checkpoint = None
+        for checkpoint_hours, checkpoint_min_progress in TIME_STOP_SCHEDULE:
+            if age_hours >= checkpoint_hours:
+                applicable_checkpoint = (checkpoint_hours, checkpoint_min_progress)
+            else:
+                break
+
+        if applicable_checkpoint is None:
             remaining_trades.append(trade)
             continue
 
+        _, min_progress_r = applicable_checkpoint
         entry = trade["entry"]
         if trade["direction"] == "BUY":
             progress_r = (current_close - entry) / initial_risk
         else:
             progress_r = (entry - current_close) / initial_risk
 
-        if progress_r >= TIME_STOP_MIN_PROGRESS_R:
+        if progress_r >= min_progress_r:
             remaining_trades.append(trade)  # made enough progress — let it keep running
             continue
 
