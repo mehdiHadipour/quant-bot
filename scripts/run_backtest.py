@@ -53,7 +53,7 @@ import pandas as pd
 
 from indicators import analyze_market
 from trade_monitor import (
-    is_symbol_on_cooldown, check_trailing_stop, check_open_trades, update_circuit_breaker,
+    is_symbol_on_cooldown, check_trailing_stop, check_open_trades, check_time_stop, update_circuit_breaker,
 )
 from risk_engine import can_open_trade
 from research import summarize_r_multiples
@@ -193,6 +193,7 @@ def run_portfolio_backtest(symbols, data_dir, verbose=False, max_abs_structure_s
 
             check_trailing_stop(state, current_high, current_low, symbol)
             just_closed = check_open_trades(state, current_high, current_low, current_close, symbol, as_of=as_of_dt)
+            just_closed += check_time_stop(state, current_close, symbol, as_of=as_of_dt)
             if just_closed:
                 update_circuit_breaker(state, just_closed, as_of=as_of_dt)
                 closed_trades.extend(just_closed)
