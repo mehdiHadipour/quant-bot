@@ -273,6 +273,7 @@ from trade_monitor import (
     check_open_trades,
     check_sl_warnings,
     check_trailing_stop,
+    check_time_stop,
     is_symbol_on_cooldown,
     update_circuit_breaker,
 )
@@ -699,17 +700,33 @@ def process_symbol(state, symbol, klines_for_symbol, counters):
     # the candle closed is still correctly detected as a close here.
     closed_trades = check_open_trades(state, current_high, current_low, current_close, symbol)
 
+    # Time-stop: for anything that DIDN'T organically hit TP/SL this cycle
+    # (checked second, deliberately — an organic TP/SL hit always takes
+    # priority over a time-based exit for the same trade/candle). See
+    # trade_monitor.check_time_stop's docstring and config.py's
+    # TIME_STOP_HOURS comment for why this exists and how it was validated
+    # against real backtest data before being added.
+    closed_trades += check_time_stop(state, current_close, symbol)
+
     if closed_trades:
         update_circuit_breaker(state, closed_trades)
         for trade in closed_trades:
             append_to_history(trade)
             counters["closed"] += 1
-            emoji = "✅" if trade["result"] == "WIN" else "❌"
             r = trade.get("r_multiple", 0.0)
+            if trade["result"] == "TIME_STOP":
+                emoji = "⏱️"
+                result_fa = "بسته‌شده به‌خاطر رکود (Time Stop)"
+            elif trade["result"] == "WIN":
+                emoji = "✅"
+                result_fa = "WIN"
+            else:
+                emoji = "❌"
+                result_fa = "LOSS"
             d = _decimals_for_reference_price(trade["entry"])
             send_telegram_alert(
                 f"{emoji} <b>معامله بسته شد</b> - {symbol}\n"
-                f"نتیجه: {trade['result']} ({r:+.2f}R)\n"
+                f"نتیجه: {result_fa} ({r:+.2f}R)\n"
                 f"ورود: {format_price(trade['entry'], d)}\n"
                 f"خروج: {format_price(trade['exit_price'], d)}"
             )
