@@ -1,4 +1,5 @@
 import unittest
+import unittest.mock
 from datetime import datetime, timezone, timedelta
 
 import trade_monitor
@@ -296,6 +297,91 @@ class TestTrailingStop(unittest.TestCase):
         self.assertAlmostEqual(closed[0]["r_multiple"], 3.0, places=3)  # (130-100)/10, NOT 0.0
 
 
+class TestTimeStop(unittest.TestCase):
+    """Tests for check_time_stop — added after a real backtest showed
+    trades stalled below TIME_STOP_MIN_PROGRESS_R after TIME_STOP_HOURS
+    have a real, validated tendency toward a worse final outcome. See
+    config.py's TIME_STOP_HOURS comment for the full data behind this."""
+
+    def _open_trade(self, symbol="BTCUSDT", direction="BUY", entry=100, sl=90, hours_ago=10):
+        opened_at = datetime.now(timezone.utc) - timedelta(hours=hours_ago)
+        return {
+            "symbol": symbol, "direction": direction, "entry": entry, "sl": sl, "tp": entry + 30,
+            "initial_risk": abs(entry - sl), "status": "open", "time": opened_at.isoformat(),
+        }
+
+    def test_disabled_when_time_stop_hours_is_zero(self):
+        state = fresh_state()
+        state["trades"] = [self._open_trade(hours_ago=100)]
+        with unittest.mock.patch("trade_monitor.TIME_STOP_HOURS", 0.0):
+            closed = trade_monitor.check_time_stop(state, current_close=95, symbol="BTCUSDT")
+        self.assertEqual(closed, [])
+        self.assertEqual(state["trades"][0]["status"], "open")
+
+    def test_too_young_is_left_alone_regardless_of_progress(self):
+        state = fresh_state()
+        state["trades"] = [self._open_trade(hours_ago=1)]  # well under the 8h default
+        with unittest.mock.patch("trade_monitor.TIME_STOP_HOURS", 8.0), \
+             unittest.mock.patch("trade_monitor.TIME_STOP_MIN_PROGRESS_R", 0.3):
+            closed = trade_monitor.check_time_stop(state, current_close=95, symbol="BTCUSDT")  # stalled price
+        self.assertEqual(closed, [])
+        self.assertEqual(state["trades"][0]["status"], "open")
+
+    def test_old_and_stalled_gets_closed(self):
+        state = fresh_state()
+        state["trades"] = [self._open_trade(entry=100, sl=90, hours_ago=10)]  # 1R = 10
+        with unittest.mock.patch("trade_monitor.TIME_STOP_HOURS", 8.0), \
+             unittest.mock.patch("trade_monitor.TIME_STOP_MIN_PROGRESS_R", 0.3):
+            # current_close=101 -> progress = (101-100)/10 = 0.1R < 0.3R threshold
+            closed = trade_monitor.check_time_stop(state, current_close=101, symbol="BTCUSDT")
+        self.assertEqual(len(closed), 1)
+        self.assertEqual(closed[0]["result"], "TIME_STOP")
+        self.assertEqual(closed[0]["exit_price"], 101)
+        self.assertAlmostEqual(closed[0]["r_multiple"], 0.1)
+        self.assertEqual(state["trades"], [])
+
+    def test_old_but_sufficiently_progressed_is_left_running(self):
+        state = fresh_state()
+        state["trades"] = [self._open_trade(entry=100, sl=90, hours_ago=10)]  # 1R = 10
+        with unittest.mock.patch("trade_monitor.TIME_STOP_HOURS", 8.0), \
+             unittest.mock.patch("trade_monitor.TIME_STOP_MIN_PROGRESS_R", 0.3):
+            # current_close=104 -> progress = 0.4R >= 0.3R threshold
+            closed = trade_monitor.check_time_stop(state, current_close=104, symbol="BTCUSDT")
+        self.assertEqual(closed, [])
+        self.assertEqual(state["trades"][0]["status"], "open")
+
+    def test_sell_direction_progress_computed_correctly(self):
+        state = fresh_state()
+        state["trades"] = [self._open_trade(direction="SELL", entry=100, sl=110, hours_ago=10)]  # 1R = 10
+        with unittest.mock.patch("trade_monitor.TIME_STOP_HOURS", 8.0), \
+             unittest.mock.patch("trade_monitor.TIME_STOP_MIN_PROGRESS_R", 0.3):
+            # current_close=95 -> progress = (100-95)/10 = 0.5R >= 0.3R -> left running
+            closed = trade_monitor.check_time_stop(state, current_close=95, symbol="BTCUSDT")
+        self.assertEqual(closed, [])
+
+    def test_missing_initial_risk_is_left_alone(self):
+        """Trades opened before this feature shipped (or any trade
+        missing initial_risk for some other reason) must not crash or be
+        force-closed — fail open, matching the codebase's existing
+        convention for optional/newer fields."""
+        state = fresh_state()
+        trade = self._open_trade(hours_ago=100)
+        del trade["initial_risk"]
+        state["trades"] = [trade]
+        with unittest.mock.patch("trade_monitor.TIME_STOP_HOURS", 8.0):
+            closed = trade_monitor.check_time_stop(state, current_close=50, symbol="BTCUSDT")
+        self.assertEqual(closed, [])
+        self.assertEqual(state["trades"][0]["status"], "open")
+
+    def test_ignores_other_symbols(self):
+        state = fresh_state()
+        state["trades"] = [self._open_trade(symbol="ETHUSDT", hours_ago=100)]
+        with unittest.mock.patch("trade_monitor.TIME_STOP_HOURS", 8.0):
+            closed = trade_monitor.check_time_stop(state, current_close=50, symbol="BTCUSDT")
+        self.assertEqual(closed, [])
+        self.assertEqual(state["trades"][0]["status"], "open")
+
+
 class TestSlWarnings(unittest.TestCase):
     def test_fires_once_then_stays_silent_for_same_trade(self):
         state = fresh_state()
@@ -394,6 +480,24 @@ class TestCircuitBreakerAndDashboard(unittest.TestCase):
         closed = trade_monitor.check_open_trades(state, 121, 119, 120, "BTCUSDT", as_of=historical_now)
         self.assertEqual(len(closed), 1)
         self.assertEqual(closed[0]["exit_time"], historical_now.isoformat())
+
+    def test_time_stop_result_folds_into_streak_by_sign(self):
+        """A profitable TIME_STOP behaves like a WIN (resets streak); a
+        losing or breakeven one behaves like a LOSS (extends it, and
+        triggers cooldown) — see the comment in update_circuit_breaker."""
+        state = fresh_state()
+        trade_monitor.update_circuit_breaker(state, [{"symbol": "BTCUSDT", "result": "LOSS", "r_multiple": -1.0}])
+        trade_monitor.update_circuit_breaker(state, [{"symbol": "BTCUSDT", "result": "LOSS", "r_multiple": -1.0}])
+        self.assertEqual(state["stats"]["streak"], 2)
+
+        trade_monitor.update_circuit_breaker(state, [{"symbol": "BTCUSDT", "result": "TIME_STOP", "r_multiple": 0.15}])
+        self.assertEqual(state["stats"]["streak"], 0, "a profitable TIME_STOP should reset the streak like a WIN")
+        self.assertEqual(state["stats"]["wins"], 1)
+
+        trade_monitor.update_circuit_breaker(state, [{"symbol": "ETHUSDT", "result": "TIME_STOP", "r_multiple": -0.1}])
+        self.assertEqual(state["stats"]["streak"], 1, "a losing TIME_STOP should extend the streak like a LOSS")
+        self.assertEqual(state["stats"]["losses"], 3, "2 earlier LOSS calls + this TIME_STOP-as-loss")
+        self.assertIn("ETHUSDT", state["symbol_cooldowns"])
 
 
 if __name__ == "__main__":
