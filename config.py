@@ -102,21 +102,54 @@ SL_WARNING_THRESHOLD = _bounded_float_env("SL_WARNING_THRESHOLD", 0.8, 0.0, 1.0)
 TRAILING_TRIGGER_R = _bounded_float_env("TRAILING_TRIGGER_R", 0.5, 0.0, 1.0)
 PARTIAL_LOCK_TRIGGER_R = _bounded_float_env("PARTIAL_LOCK_TRIGGER_R", 0.75, 0.0, 1.0)
 PARTIAL_LOCK_R = _bounded_float_env("PARTIAL_LOCK_R", 0.5, 0.0, 10.0)
-# Time-stop — added after a real backtest showed a genuinely strong,
-# validated pattern (unlike several other tested-and-rejected ideas: entry
-# freshness, order-flow/CVD agreement, RSI extremity, distance from EMA,
-# and a wider SL/TP all showed ~zero correlation with outcome on real
-# data). Trades still under TIME_STOP_MIN_PROGRESS_R progress toward TP
-# after TIME_STOP_HOURS averaged a real, final -0.33R outcome (32.5% win
-# rate); trades that HAD reached that much progress by then averaged
-# +0.42R (64.4% win rate) — a much larger, cleaner split than anything
-# else tested. Interpreted as: fast resolution (either way) reflects
-# market conviction; trades that just drift sideways for hours tend to
-# keep drifting into a loss rather than recover. Re-validated with a real
-# backtest re-run after implementing (see release notes) — not just this
-# correlation check.
-TIME_STOP_HOURS = _bounded_float_env("TIME_STOP_HOURS", 8.0, 0.0, 10000.0)
-TIME_STOP_MIN_PROGRESS_R = _bounded_float_env("TIME_STOP_MIN_PROGRESS_R", 0.3, -10.0, 10.0)
+
+
+def _parse_time_stop_schedule(raw, default):
+    """Parses 'hours:min_progress_r,hours:min_progress_r,...' into a
+    sorted list of (hours, min_progress_r) tuples. Falls back to
+    `default` (already such a list) on any parse error or empty input —
+    this schedule is a decay of increasingly demanding checkpoints as a
+    trade ages, so a malformed value should never silently disable it or
+    crash startup."""
+    if not raw or not raw.strip():
+        return default
+    try:
+        checkpoints = []
+        for part in raw.split(","):
+            hours_str, progress_str = part.split(":")
+            checkpoints.append((float(hours_str), float(progress_str)))
+        if not checkpoints:
+            return default
+        return sorted(checkpoints, key=lambda c: c[0])
+    except (ValueError, IndexError):
+        log.warning("Invalid TIME_STOP_SCHEDULE=%r; using default %s", raw, default)
+        return default
+
+
+# Graduated time-stop (V27.19) — a decay schedule of increasingly
+# demanding checkpoints, replacing V27.18's single (8h, 0.3R) threshold.
+# NostalgiaForInfinity (a widely-used, community-vetted Freqtrade
+# strategy researched this round) uses the same core idea — a time-based
+# ROI table where the minimum acceptable profit rises as a trade ages —
+# so this generalizes V27.18's single checkpoint into the same shape.
+#
+# Both checkpoints below are independently backtest-validated (not just
+# the second one, carried over from V27.18): at 4h, trades under 0.10R
+# progress averaged a real -0.35R final outcome vs +0.29R for trades that
+# had reached it; at 8h, under 0.30R averaged -0.33R vs +0.42R. The
+# schedule deliberately stops at 8h — a 32-64h duration bucket in the
+# same data showed trades surviving that long swung back to a small
+# POSITIVE average outcome, so extending this decay further is not
+# supported by what's actually been tested; don't add later checkpoints
+# without validating them the same way first.
+#
+# At evaluation time, the LATEST checkpoint whose hour threshold the
+# trade has already passed is the one that applies (e.g. a 10-hour-old
+# trade is judged against the 8h checkpoint, not the 4h one) — so later,
+# more demanding checkpoints supersede earlier ones as a trade ages.
+TIME_STOP_SCHEDULE = _parse_time_stop_schedule(
+    os.getenv("TIME_STOP_SCHEDULE"), default=[(4.0, 0.10), (8.0, 0.30)]
+)
 CYCLE_MINUTES = _positive_int_env("CYCLE_MINUTES", 10, minimum=1)
 SILENCE_GAP_MULTIPLIER = _bounded_float_env("SILENCE_GAP_MULTIPLIER", 6.0, 1.0, 100.0)
 SYMBOL_COOLDOWN_CYCLES = _positive_int_env("SYMBOL_COOLDOWN_CYCLES", 6, minimum=0)
@@ -146,7 +179,13 @@ ADAPTIVE_MAX_RV = _bounded_float_env("ADAPTIVE_MAX_RV", 2.00, 0.01, 10.0)
 
 # V27.13 Multi-Market diversification. Commodity symbols are fetched from
 # WEEX contract market data; crypto symbols keep the Binance/Bybit stack.
-CRYPTO_SYMBOLS = [s for s in SYMBOLS if s not in {"XAUUSDT","XAGUSDT","CLUSDT","NATGASUSDT"}]
-COMMODITY_SYMBOLS = [s for s in SYMBOLS if s in {"XAUUSDT","XAGUSDT","CLUSDT","NATGASUSDT"}]
+# Classification reuses data_engine.WEEX_COMMODITY_SYMBOLS (see that
+# module's comment — it also lists unverified candidate index/stock
+# tickers researched for V27.19; only symbols actually present in SYMBOLS
+# get classified, so adding an unverified ticker here has no effect
+# until it's also added to SYMBOLS).
+from data_engine import WEEX_COMMODITY_SYMBOLS as _WEEX_SYMBOLS
+CRYPTO_SYMBOLS = [s for s in SYMBOLS if s not in _WEEX_SYMBOLS]
+COMMODITY_SYMBOLS = [s for s in SYMBOLS if s in _WEEX_SYMBOLS]
 MAX_OPEN_PER_MARKET_GROUP = _positive_int_env("MAX_OPEN_PER_MARKET_GROUP", 2, minimum=0)
 DIVERSIFICATION_ENABLED = os.getenv("DIVERSIFICATION_ENABLED", "true").strip().lower() in {"1","true","yes","on"}
