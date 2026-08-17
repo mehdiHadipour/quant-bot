@@ -145,7 +145,21 @@ def fetch_okx_klines(symbol, interval="1h", limit=300):
 
 
 WEEX_KLINES_URL = "https://api-contract.weex.com/capi/v3/market/klines"
-WEEX_COMMODITY_SYMBOLS = {"XAUUSDT", "XAGUSDT", "CLUSDT", "NATGASUSDT"}
+WEEX_COMMODITY_SYMBOLS = {
+    "XAUUSDT", "XAGUSDT", "CLUSDT", "NATGASUSDT",
+    # Candidate additions (indices/stocks) researched from WEEX's public
+    # TradFi pages, which describe gold/silver/oil/gas plus tokenized
+    # stocks and "global indices" — but the EXACT ticker strings below
+    # could not be verified against WEEX's live API from this environment
+    # (no network access here). WEEX's own how-to examples use bare
+    # tickers without a "USDT" suffix for some of these (e.g. "NAS100",
+    # "TSLA", "HK50"), which may not match the "XAUUSDT"-style suffix
+    # convention this codebase already uses for the four verified
+    # symbols above. Before enabling any of these (via SYMBOLS in .env),
+    # confirm the exact working ticker string from WEEX's contract list
+    # or by testing fetch_weex_klines() against each candidate directly.
+    "NAS100USDT", "US30USDT", "SPX500USDT", "HK50USDT",
+}
 
 def fetch_weex_klines(symbol, interval="1h", limit=300):
     """Fetch WEEX USDT-margined contract candles for commodity/TradFi symbols.
