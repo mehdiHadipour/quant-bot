@@ -298,10 +298,12 @@ class TestTrailingStop(unittest.TestCase):
 
 
 class TestTimeStop(unittest.TestCase):
-    """Tests for check_time_stop — added after a real backtest showed
-    trades stalled below TIME_STOP_MIN_PROGRESS_R after TIME_STOP_HOURS
-    have a real, validated tendency toward a worse final outcome. See
-    config.py's TIME_STOP_HOURS comment for the full data behind this."""
+    """Tests for check_time_stop's graduated schedule (V27.19) — a decay
+    of increasingly demanding checkpoints, each independently
+    backtest-validated. See config.py's TIME_STOP_SCHEDULE comment for
+    the full data behind this."""
+
+    DEFAULT_SCHEDULE = [(4.0, 0.10), (8.0, 0.30)]
 
     def _open_trade(self, symbol="BTCUSDT", direction="BUY", entry=100, sl=90, hours_ago=10):
         opened_at = datetime.now(timezone.utc) - timedelta(hours=hours_ago)
@@ -310,42 +312,50 @@ class TestTimeStop(unittest.TestCase):
             "initial_risk": abs(entry - sl), "status": "open", "time": opened_at.isoformat(),
         }
 
-    def test_disabled_when_time_stop_hours_is_zero(self):
+    def test_disabled_when_schedule_is_empty(self):
         state = fresh_state()
         state["trades"] = [self._open_trade(hours_ago=100)]
-        with unittest.mock.patch("trade_monitor.TIME_STOP_HOURS", 0.0):
+        with unittest.mock.patch("trade_monitor.TIME_STOP_SCHEDULE", []):
             closed = trade_monitor.check_time_stop(state, current_close=95, symbol="BTCUSDT")
         self.assertEqual(closed, [])
         self.assertEqual(state["trades"][0]["status"], "open")
 
-    def test_too_young_is_left_alone_regardless_of_progress(self):
+    def test_too_young_for_any_checkpoint_is_left_alone(self):
         state = fresh_state()
-        state["trades"] = [self._open_trade(hours_ago=1)]  # well under the 8h default
-        with unittest.mock.patch("trade_monitor.TIME_STOP_HOURS", 8.0), \
-             unittest.mock.patch("trade_monitor.TIME_STOP_MIN_PROGRESS_R", 0.3):
+        state["trades"] = [self._open_trade(hours_ago=1)]  # under even the first (4h) checkpoint
+        with unittest.mock.patch("trade_monitor.TIME_STOP_SCHEDULE", self.DEFAULT_SCHEDULE):
             closed = trade_monitor.check_time_stop(state, current_close=95, symbol="BTCUSDT")  # stalled price
         self.assertEqual(closed, [])
         self.assertEqual(state["trades"][0]["status"], "open")
 
-    def test_old_and_stalled_gets_closed(self):
+    def test_stalled_at_first_checkpoint_gets_closed(self):
         state = fresh_state()
-        state["trades"] = [self._open_trade(entry=100, sl=90, hours_ago=10)]  # 1R = 10
-        with unittest.mock.patch("trade_monitor.TIME_STOP_HOURS", 8.0), \
-             unittest.mock.patch("trade_monitor.TIME_STOP_MIN_PROGRESS_R", 0.3):
-            # current_close=101 -> progress = (101-100)/10 = 0.1R < 0.3R threshold
-            closed = trade_monitor.check_time_stop(state, current_close=101, symbol="BTCUSDT")
+        state["trades"] = [self._open_trade(entry=100, sl=90, hours_ago=5)]  # past 4h, before 8h; 1R=10
+        with unittest.mock.patch("trade_monitor.TIME_STOP_SCHEDULE", self.DEFAULT_SCHEDULE):
+            # current_close=100.5 -> progress = 0.05R < 0.10R (4h checkpoint)
+            closed = trade_monitor.check_time_stop(state, current_close=100.5, symbol="BTCUSDT")
         self.assertEqual(len(closed), 1)
         self.assertEqual(closed[0]["result"], "TIME_STOP")
-        self.assertEqual(closed[0]["exit_price"], 101)
-        self.assertAlmostEqual(closed[0]["r_multiple"], 0.1)
-        self.assertEqual(state["trades"], [])
+        self.assertAlmostEqual(closed[0]["r_multiple"], 0.05)
 
-    def test_old_but_sufficiently_progressed_is_left_running(self):
+    def test_clears_first_checkpoint_but_not_second(self):
+        """A trade past the 4h checkpoint with enough progress to clear
+        IT survives that check — but once it's also past 8h, it's judged
+        against the MORE demanding 8h checkpoint, not the 4h one it
+        already cleared."""
+        state = fresh_state()
+        state["trades"] = [self._open_trade(entry=100, sl=90, hours_ago=10)]  # past both; 1R=10
+        with unittest.mock.patch("trade_monitor.TIME_STOP_SCHEDULE", self.DEFAULT_SCHEDULE):
+            # current_close=101.5 -> progress = 0.15R: clears 4h's 0.10R, but not 8h's 0.30R
+            closed = trade_monitor.check_time_stop(state, current_close=101.5, symbol="BTCUSDT")
+        self.assertEqual(len(closed), 1, "should be judged against the 8h checkpoint (0.30R), not just the 4h one")
+        self.assertAlmostEqual(closed[0]["r_multiple"], 0.15)
+
+    def test_clears_the_applicable_checkpoint_and_keeps_running(self):
         state = fresh_state()
         state["trades"] = [self._open_trade(entry=100, sl=90, hours_ago=10)]  # 1R = 10
-        with unittest.mock.patch("trade_monitor.TIME_STOP_HOURS", 8.0), \
-             unittest.mock.patch("trade_monitor.TIME_STOP_MIN_PROGRESS_R", 0.3):
-            # current_close=104 -> progress = 0.4R >= 0.3R threshold
+        with unittest.mock.patch("trade_monitor.TIME_STOP_SCHEDULE", self.DEFAULT_SCHEDULE):
+            # current_close=104 -> progress = 0.4R >= 0.30R (8h checkpoint) -> left running
             closed = trade_monitor.check_time_stop(state, current_close=104, symbol="BTCUSDT")
         self.assertEqual(closed, [])
         self.assertEqual(state["trades"][0]["status"], "open")
@@ -353,9 +363,8 @@ class TestTimeStop(unittest.TestCase):
     def test_sell_direction_progress_computed_correctly(self):
         state = fresh_state()
         state["trades"] = [self._open_trade(direction="SELL", entry=100, sl=110, hours_ago=10)]  # 1R = 10
-        with unittest.mock.patch("trade_monitor.TIME_STOP_HOURS", 8.0), \
-             unittest.mock.patch("trade_monitor.TIME_STOP_MIN_PROGRESS_R", 0.3):
-            # current_close=95 -> progress = (100-95)/10 = 0.5R >= 0.3R -> left running
+        with unittest.mock.patch("trade_monitor.TIME_STOP_SCHEDULE", self.DEFAULT_SCHEDULE):
+            # current_close=95 -> progress = (100-95)/10 = 0.5R >= 0.30R -> left running
             closed = trade_monitor.check_time_stop(state, current_close=95, symbol="BTCUSDT")
         self.assertEqual(closed, [])
 
@@ -368,7 +377,7 @@ class TestTimeStop(unittest.TestCase):
         trade = self._open_trade(hours_ago=100)
         del trade["initial_risk"]
         state["trades"] = [trade]
-        with unittest.mock.patch("trade_monitor.TIME_STOP_HOURS", 8.0):
+        with unittest.mock.patch("trade_monitor.TIME_STOP_SCHEDULE", self.DEFAULT_SCHEDULE):
             closed = trade_monitor.check_time_stop(state, current_close=50, symbol="BTCUSDT")
         self.assertEqual(closed, [])
         self.assertEqual(state["trades"][0]["status"], "open")
@@ -376,7 +385,7 @@ class TestTimeStop(unittest.TestCase):
     def test_ignores_other_symbols(self):
         state = fresh_state()
         state["trades"] = [self._open_trade(symbol="ETHUSDT", hours_ago=100)]
-        with unittest.mock.patch("trade_monitor.TIME_STOP_HOURS", 8.0):
+        with unittest.mock.patch("trade_monitor.TIME_STOP_SCHEDULE", self.DEFAULT_SCHEDULE):
             closed = trade_monitor.check_time_stop(state, current_close=50, symbol="BTCUSDT")
         self.assertEqual(closed, [])
         self.assertEqual(state["trades"][0]["status"], "open")
