@@ -2,7 +2,8 @@ from datetime import datetime, timezone, timedelta
 
 from config import (
     SL_WARNING_THRESHOLD, SYMBOL_COOLDOWN_CYCLES, TRAILING_TRIGGER_R, CYCLE_MINUTES,
-    PARTIAL_LOCK_TRIGGER_R, PARTIAL_LOCK_R, TIME_STOP_SCHEDULE,
+    PARTIAL_LOCK_TRIGGER_R, PARTIAL_LOCK_R, NEAR_TP_LOCK_TRIGGER_R, NEAR_TP_LOCK_R,
+    TIME_STOP_SCHEDULE,
 )
 from logger import log
 
@@ -95,28 +96,43 @@ def check_open_trades(state, current_high, current_low, current_close, symbol, a
 
 
 def check_trailing_stop(state, current_high, current_low, symbol):
-    """Two-stage trailing stop, checked against the candle's favorable
+    """Three-stage trailing stop, checked against the candle's favorable
     extreme (high for BUY, low for SELL) so a brief spike toward target
     still triggers protection even if the candle closed back below/above
-    it. Returns a list of {"trade": trade, "stage": "breakeven"|"partial_lock"}
-    dicts describing what just happened, for the caller to message.
+    it. Returns a list of {"trade": trade, "stage": "breakeven"|
+    "partial_lock"|"near_tp_lock"} dicts describing what just happened,
+    for the caller to message.
 
     Stage 1 (TRAILING_TRIGGER_R, default 0.5): move SL to breakeven.
     Stage 2 (PARTIAL_LOCK_TRIGGER_R, default 0.75, v25.12): move SL to
     lock in PARTIAL_LOCK_R (default 0.5) worth of REAL profit instead of
     just breakeven — so a trade that gets most of the way to target and
     then reverses still banks a partial win instead of round-tripping
-    all the way back to 0R. Needs "initial_risk" (frozen at trade-open
-    time, v25.6+) to know what one R means in price terms; trades that
-    predate that field simply never reach stage 2 (they still get stage
-    1, same as before). Stage 2 is checked first so a candle that jumps
-    straight past both thresholds locks the partial profit directly
-    rather than momentarily landing on breakeven first."""
+    all the way back to 0R.
+    Stage 3 (NEAR_TP_LOCK_TRIGGER_R, default 0.90, V27.20): a third,
+    tighter tier — added after a real backtest re-simulation (not just
+    the MFE-approximation that motivated testing it) showed trades that
+    got extremely close to TP (>=90% of the way there) and then reversed
+    were still only banking Stage 2's flat 0.5R, when they'd earned much
+    more of the move. Locks NEAR_TP_LOCK_R (default 0.7) instead.
+
+    All three "_R"-suffixed trigger constants are actually fractions of
+    the distance from entry to TP (0 to 1+), not raw R-multiples — a
+    naming leftover from before TP was recalibrated to exactly 1.0R
+    (V27.17); functionally correct either way since they're compared
+    directly against `progress`, computed the same way below.
+
+    Needs "initial_risk" (frozen at trade-open time, v25.6+) to know
+    what one R means in price terms; trades that predate that field
+    simply never reach stage 2/3 (they still get stage 1, same as
+    before). Checked tightest-stage-first so a candle that jumps
+    straight past multiple thresholds locks the most it earned directly,
+    rather than momentarily landing on an earlier, looser stage first."""
     moved = []
     for trade in state.get("trades", []):
         if trade.get("status") != "open" or trade["symbol"] != symbol:
             continue
-        if trade.get("sl_partial_lock_done"):
+        if trade.get("sl_near_tp_lock_done"):
             continue  # fully trailed already, nothing further to do here
 
         entry, tp = trade["entry"], trade["tp"]
@@ -133,7 +149,13 @@ def check_trailing_stop(state, current_high, current_low, symbol):
             progress = (entry - best_price) / target_distance
 
         initial_risk = trade.get("initial_risk")
-        if initial_risk and progress >= PARTIAL_LOCK_TRIGGER_R:
+        if initial_risk and progress >= NEAR_TP_LOCK_TRIGGER_R:
+            trade["sl"] = entry + direction_sign * (NEAR_TP_LOCK_R * initial_risk)
+            trade["sl_moved_to_breakeven"] = True
+            trade["sl_partial_lock_done"] = True
+            trade["sl_near_tp_lock_done"] = True
+            moved.append({"trade": trade, "stage": "near_tp_lock"})
+        elif not trade.get("sl_partial_lock_done") and initial_risk and progress >= PARTIAL_LOCK_TRIGGER_R:
             trade["sl"] = entry + direction_sign * (PARTIAL_LOCK_R * initial_risk)
             trade["sl_moved_to_breakeven"] = True
             trade["sl_partial_lock_done"] = True
