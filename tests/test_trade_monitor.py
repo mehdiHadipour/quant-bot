@@ -114,15 +114,17 @@ class TestTrailingStop(unittest.TestCase):
         self.assertTrue(state["trades"][0]["sl_moved_to_breakeven"])
 
     def test_v25_12_candle_jumping_straight_past_both_thresholds_locks_partial_directly(self):
-        """A single big candle that jumps straight past 75% should go
-        directly to partial_lock, not pause at breakeven first."""
+        """A single big candle that jumps straight past 75% (but stays
+        below the newer, tighter 90% near-TP tier) should go directly to
+        partial_lock, not pause at breakeven first."""
         state = fresh_state()
         state["trades"] = [{
             "symbol": "BTCUSDT", "direction": "BUY", "entry": 100, "sl": 90, "tp": 130,
             "status": "open", "sl_moved_to_breakeven": False, "sl_partial_lock_done": False,
             "initial_risk": 10,
         }]
-        moved = trade_monitor.check_trailing_stop(state, current_high=128, current_low=126, symbol="BTCUSDT")
+        # 80% from 100 to 130 is 124 — past partial_lock's 75%, below near_tp_lock's 90%.
+        moved = trade_monitor.check_trailing_stop(state, current_high=124, current_low=122, symbol="BTCUSDT")
         self.assertEqual(len(moved), 1)
         self.assertEqual(moved[0]["stage"], "partial_lock")
         self.assertEqual(state["trades"][0]["sl"], 105)
@@ -173,6 +175,90 @@ class TestTrailingStop(unittest.TestCase):
         self.assertEqual(len(moved), 1)
         self.assertEqual(moved[0]["stage"], "breakeven")
         self.assertEqual(state["trades"][0]["sl"], 100)  # breakeven only, never partial_lock
+
+    def test_v27_20_near_tp_lock_at_90_percent_locks_more_profit(self):
+        """Third stage (V27.20): once price is 90% of the way to TP,
+        SL moves to lock in 0.7R — added after a real backtest
+        re-simulation showed trades reaching this close to TP and then
+        reversing were still only banking Stage 2's flat 0.5R."""
+        state = fresh_state()
+        state["trades"] = [{
+            "symbol": "BTCUSDT", "direction": "BUY", "entry": 100, "sl": 90, "tp": 130,
+            "status": "open", "sl_moved_to_breakeven": False, "sl_partial_lock_done": False,
+            "initial_risk": 10,
+        }]
+        # 90% from 100 to 130 is 127.
+        moved = trade_monitor.check_trailing_stop(state, current_high=128, current_low=124, symbol="BTCUSDT")
+        self.assertEqual(len(moved), 1)
+        self.assertEqual(moved[0]["stage"], "near_tp_lock")
+        # New SL = entry + 0.7 * initial_risk = 100 + 7 = 107
+        self.assertEqual(state["trades"][0]["sl"], 107)
+        self.assertTrue(state["trades"][0]["sl_near_tp_lock_done"])
+        self.assertTrue(state["trades"][0]["sl_partial_lock_done"])
+        self.assertTrue(state["trades"][0]["sl_moved_to_breakeven"])
+
+    def test_v27_20_candle_jumping_straight_to_90_percent_locks_near_tp_directly(self):
+        """A single big candle jumping straight past 90% should go
+        directly to near_tp_lock, not pause at breakeven or partial_lock
+        first — tightest-stage-first, same principle as the existing
+        partial_lock-skip-breakeven test above."""
+        state = fresh_state()
+        state["trades"] = [{
+            "symbol": "BTCUSDT", "direction": "BUY", "entry": 100, "sl": 90, "tp": 130,
+            "status": "open", "sl_moved_to_breakeven": False, "sl_partial_lock_done": False,
+            "initial_risk": 10,
+        }]
+        moved = trade_monitor.check_trailing_stop(state, current_high=130, current_low=129, symbol="BTCUSDT")
+        self.assertEqual(len(moved), 1)
+        self.assertEqual(moved[0]["stage"], "near_tp_lock")
+        self.assertEqual(state["trades"][0]["sl"], 107)
+
+    def test_v27_20_sell_direction_near_tp_lock_locks_correctly(self):
+        state = fresh_state()
+        state["trades"] = [{
+            "symbol": "BTCUSDT", "direction": "SELL", "entry": 100, "sl": 110, "tp": 70,
+            "status": "open", "sl_moved_to_breakeven": False, "sl_partial_lock_done": False,
+            "initial_risk": 10,
+        }]
+        # 90% from 100 down to 70 is 73.
+        moved = trade_monitor.check_trailing_stop(state, current_high=76, current_low=72, symbol="BTCUSDT")
+        self.assertEqual(moved[0]["stage"], "near_tp_lock")
+        # New SL = entry - 0.7 * initial_risk = 100 - 7 = 93
+        self.assertEqual(state["trades"][0]["sl"], 93)
+
+    def test_v27_20_progressive_three_cycle_trail_through_all_stages(self):
+        """Across three separate cycles: breakeven, then partial_lock,
+        then near_tp_lock — each stage's SL strictly tightens."""
+        state = fresh_state()
+        state["trades"] = [{
+            "symbol": "BTCUSDT", "direction": "BUY", "entry": 100, "sl": 90, "tp": 130,
+            "status": "open", "sl_moved_to_breakeven": False, "sl_partial_lock_done": False,
+            "initial_risk": 10,
+        }]
+        first = trade_monitor.check_trailing_stop(state, current_high=116, current_low=112, symbol="BTCUSDT")
+        self.assertEqual(first[0]["stage"], "breakeven")
+
+        second = trade_monitor.check_trailing_stop(state, current_high=124, current_low=120, symbol="BTCUSDT")
+        self.assertEqual(second[0]["stage"], "partial_lock")
+        self.assertEqual(state["trades"][0]["sl"], 105)
+
+        third = trade_monitor.check_trailing_stop(state, current_high=128, current_low=126, symbol="BTCUSDT")
+        self.assertEqual(third[0]["stage"], "near_tp_lock")
+        self.assertEqual(state["trades"][0]["sl"], 107)
+
+    def test_v27_20_once_near_tp_locked_no_further_action(self):
+        """After sl_near_tp_lock_done, the trade is fully trailed — later
+        cycles (even ones that would otherwise re-trigger a stage) must
+        be a no-op, matching the function's early-continue guard."""
+        state = fresh_state()
+        state["trades"] = [{
+            "symbol": "BTCUSDT", "direction": "BUY", "entry": 100, "sl": 107, "tp": 130,
+            "status": "open", "sl_moved_to_breakeven": True, "sl_partial_lock_done": True,
+            "sl_near_tp_lock_done": True, "initial_risk": 10,
+        }]
+        moved = trade_monitor.check_trailing_stop(state, current_high=129, current_low=128, symbol="BTCUSDT")
+        self.assertEqual(moved, [])
+        self.assertEqual(state["trades"][0]["sl"], 107)  # unchanged
 
     def test_v25_12_win_after_partial_lock_still_credits_full_original_r(self):
         """Partial-lock must not corrupt the eventual win's R-multiple —
