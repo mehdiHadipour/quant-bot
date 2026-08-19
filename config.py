@@ -102,6 +102,13 @@ SL_WARNING_THRESHOLD = _bounded_float_env("SL_WARNING_THRESHOLD", 0.8, 0.0, 1.0)
 TRAILING_TRIGGER_R = _bounded_float_env("TRAILING_TRIGGER_R", 0.5, 0.0, 1.0)
 PARTIAL_LOCK_TRIGGER_R = _bounded_float_env("PARTIAL_LOCK_TRIGGER_R", 0.75, 0.0, 1.0)
 PARTIAL_LOCK_R = _bounded_float_env("PARTIAL_LOCK_R", 0.5, 0.0, 10.0)
+# Third trailing-stop tier (V27.20) — added after a real backtest
+# re-simulation (not just an MFE-based estimate) showed trades that got
+# extremely close to TP (>=90% of the way there) and then reversed were
+# still only banking Stage 2's flat 0.5R, when they'd earned much more
+# of the move. See trade_monitor.check_trailing_stop's docstring.
+NEAR_TP_LOCK_TRIGGER_R = _bounded_float_env("NEAR_TP_LOCK_TRIGGER_R", 0.90, 0.0, 2.0)
+NEAR_TP_LOCK_R = _bounded_float_env("NEAR_TP_LOCK_R", 0.70, 0.0, 10.0)
 
 
 def _parse_time_stop_schedule(raw, default):
