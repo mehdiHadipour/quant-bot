@@ -62,6 +62,8 @@ jobs:
           TRAILING_TRIGGER_R: ${{ vars.TRAILING_TRIGGER_R }}
           PARTIAL_LOCK_TRIGGER_R: ${{ vars.PARTIAL_LOCK_TRIGGER_R }}
           PARTIAL_LOCK_R: ${{ vars.PARTIAL_LOCK_R }}
+          NEAR_TP_LOCK_TRIGGER_R: ${{ vars.NEAR_TP_LOCK_TRIGGER_R }}
+          NEAR_TP_LOCK_R: ${{ vars.NEAR_TP_LOCK_R }}
           TIME_STOP_SCHEDULE: ${{ vars.TIME_STOP_SCHEDULE }}
           MAX_CONCURRENT_TRADES: ${{ vars.MAX_CONCURRENT_TRADES }}
           MAX_DAILY_LOSS_R: ${{ vars.MAX_DAILY_LOSS_R }}
