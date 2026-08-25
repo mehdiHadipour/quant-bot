@@ -1,85 +1,43 @@
-name: Quant Bot - Backtest (manual)
-
+name: Quant Bot Backtest V27.30
 on:
   workflow_dispatch:
     inputs:
       symbols:
-        description: "Comma-separated symbols, e.g. BTCUSDT,ETHUSDT (default matches the live bot's current crypto symbol list, V27.22 — WEEX-only symbols like XAUUSDT aren't fetchable by this workflow's Binance-only data source)"
+        description: 'Comma-separated crypto symbols with historical CSVs in backtest_data/'
         required: true
-        default: "BNBUSDT,SOLUSDT,DOGEUSDT,AVAXUSDT,LINKUSDT,DOTUSDT,ZECUSDT,NEARUSDT"
-      days:
-        description: "How many days of history to test"
+        default: 'BNBUSDT,SOLUSDT,DOGEUSDT,AVAXUSDT,LINKUSDT,DOTUSDT,ZECUSDT,NEARUSDT'
+      data_dir:
+        description: 'Historical data directory'
         required: true
-        default: "180"
-      atr_sl_multiplier:
-        description: "SL distance = ATR x this (leave as default to use the live bot's current value, 1.8)"
-        required: false
-        default: "1.8"
-      atr_tp_multiplier:
-        description: "TP distance = ATR x this (leave as default to use the live bot's current value, 1.8 — a 1:1 reward:risk; was 3.0 before V27.17's backtest-driven recalibration)"
-        required: false
-        default: "1.8"
-      max_abs_structure_score:
-        description: "EXPERIMENTAL: reject signals whose |Structure/Breakout| score exceeds this (leave EMPTY to disable)"
-        required: false
-        default: ""
-      invert_direction:
-        description: "EXPERIMENTAL: test taking the OPPOSITE of every signal (fade the bot). true/false"
-        required: false
-        default: "false"
-
-permissions:
-  contents: read
-
+        default: 'backtest_data'
 jobs:
   backtest:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 20
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-
-      - name: Setup Python
-        uses: actions/setup-python@v6
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
-          cache: "pip"
-
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-
-      - name: Download historical data
-        run: |
-          python scripts/fetch_historical_klines.py \
-            --symbols "${{ inputs.symbols }}" \
-            --days "${{ inputs.days }}"
-
-      - name: Run backtest
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Validate project
+        run: python scripts/validate_project.py
+      - name: Run portfolio backtest
         env:
-          ATR_SL_MULTIPLIER: ${{ inputs.atr_sl_multiplier }}
-          ATR_TP_MULTIPLIER: ${{ inputs.atr_tp_multiplier }}
+          SMART_CONTEXT_ENABLED: 'true'
+          SMART_CONTEXT_MIN_SCORE: '0'
+          FOOTPRINT_HARD_FILTER: 'false'
+          WHALE_FILTER_ENABLED: 'true'
+          FUNDAMENTAL_FILTER_ENABLED: 'true'
+          SESSION_FILTER_ENABLED: 'true'
+          FUNDAMENTAL_HARD_VETO: '3'
+          SYMBOLS: ${{ inputs.symbols }}
         run: |
-          echo "Testing with ATR_SL_MULTIPLIER=$ATR_SL_MULTIPLIER, ATR_TP_MULTIPLIER=$ATR_TP_MULTIPLIER"
-          EXTRA_ARGS=""
-          if [ -n "${{ inputs.max_abs_structure_score }}" ]; then
-            EXTRA_ARGS="$EXTRA_ARGS --max-abs-structure-score ${{ inputs.max_abs_structure_score }}"
-          fi
-          if [ "${{ inputs.invert_direction }}" = "true" ]; then
-            EXTRA_ARGS="$EXTRA_ARGS --invert-direction"
-          fi
-          python scripts/run_backtest.py \
-            --symbols "${{ inputs.symbols }}" \
-            --verbose $EXTRA_ARGS
-      - name: Run Hybrid AdaptiveTrend research backtest
-        run: |
-          python scripts/run_adaptive_backtest.py \
-            --data-dir backtest_data \
-            --symbols "${{ inputs.symbols }}"
-
-      - name: Upload results
-        if: always()
-        uses: actions/upload-artifact@v4
+          python scripts/run_backtest.py --symbols "${{ inputs.symbols }}" --data-dir "${{ inputs.data_dir }}" | tee backtest_v27_30.txt
+      - uses: actions/upload-artifact@v4
         with:
-          name: backtest-results
-          path: backtest_data/
-          retention-days: 30
+          name: quant-bot-v27-30-backtest
+          path: |
+            backtest_v27_30.txt
+            backtest_reports/
