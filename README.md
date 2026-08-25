@@ -59,3 +59,21 @@ New, additive (all off/no-op unless the underlying data supports them; nothing h
   ```
 
 **Deliberately NOT implemented: automatic order execution on a real exchange.** The bot still only sends Telegram alerts; it does not place live orders. Wiring real execution in requires the user's own exchange API keys, exchange-specific order/margin handling, and extensive testing against that exchange's live API — none of which can be done or verified in this environment. Getting this wrong risks real, immediate capital loss (not just a missed alert), so it is intentionally out of scope here rather than shipped untested.
+
+## V27.30 — final Smart Context layer
+
+The current release adds all requested context layers together:
+
+- **Pullback / anti-chase entry**: prefers entries near the 1H EMA20/EMA50 trend zone and penalizes extended price.
+- **Footprint / order flow**: real recent Binance aggregate-trade footprint is used live when available; historical backtests use the candle-level taker-flow/rejection proxy because genuine historical tick footprint was not supplied.
+- **Whale / Smart Money**: per-symbol whale bias can be supplied from a timestamped Hyperdash-derived JSON snapshot. The package does not invent a private Hyperdash API.
+- **Fundamental news**: optional recent headline scan via the public GDELT article search, cached and fail-neutral.
+- **Global sessions**: UTC Asia/London/New York and London-New York overlap context.
+- **Market-regime idea from the supplied screenshot**: regime/context is explicitly part of the decision, but no unsupported proprietary Claude/World Monitor/ForexBot formula is claimed.
+- **Direction policy**: the supplied 2,372-trade history showed DOGE/DOT BUY was materially less negative than SELL, while ZEC SELL was less negative than BUY. Therefore the default policy is now SELL-only for BNB/SOL/AVAX/LINK/NEAR/ZEC and BUY-only for DOGE/DOT. This is a filter based on the supplied sample, not a profitability claim.
+
+### Important validation boundary
+
+The included historical ZIP does **not** contain historical Hyperdash trader snapshots, historical news headlines, or genuine historical tick-by-tick footprint data. Therefore those three inputs cannot honestly be reconstructed for a point-in-time backtest from the supplied files. V27.30 uses neutral values when those external inputs are absent and uses a deterministic candle proxy for footprint during historical testing. This prevents look-ahead and fabricated historical data.
+
+For live operation, `WHALE_BIAS_JSON`/`WHALE_BIAS_FILE` can inject Hyperdash-derived per-symbol positioning. Hyperdash documents top-trader positions, position changes, trader PnL/win-rate/Sharpe filters and ticker-specific bias views, which are the intended source fields for this bridge. The documented strategic copytrading system itself is exposure-based rather than simple one-position mirroring. 
