@@ -1,0 +1,4 @@
+Quant Bot V27.12 Hybrid AdaptiveTrend Final
+Built from V27.11 production framework + V31 AdaptiveTrend research components.
+Validated: python -m compileall; scripts/validate_project.py
+No API credentials included.
