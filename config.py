@@ -83,7 +83,7 @@ SYMBOLS = [
         # SELL_ONLY_SYMBOLS below): BNBUSDT, SOLUSDT, AVAXUSDT, LINKUSDT,
         # NEARUSDT. Fully bidirectional (no restriction): DOGEUSDT,
         # DOTUSDT, ZECUSDT.
-        "BNBUSDT,SOLUSDT,DOGEUSDT,AVAXUSDT,LINKUSDT,DOTUSDT,ZECUSDT,NEARUSDT,XAUUSDT,XAGUSDT,CLUSDT,NATGASUSDT",
+        "BNBUSDT,SOLUSDT,DOGEUSDT,AVAXUSDT,LINKUSDT,DOTUSDT,ZECUSDT,NEARUSDT",
     ).split(",")
     if s.strip()
 ]
@@ -92,24 +92,32 @@ SELL_ONLY_SYMBOLS = {
     s.strip().upper()
     for s in _str_env(
         "SELL_ONLY_SYMBOLS",
-        "BNBUSDT,SOLUSDT,AVAXUSDT,LINKUSDT,NEARUSDT",
+        # Data-driven policy from the supplied 2,372-trade report: for these
+        # symbols the tested strategy was only evaluated in the SELL direction.
+        "BNBUSDT,SOLUSDT,AVAXUSDT,LINKUSDT,NEARUSDT,ZECUSDT",
+    ).split(",")
+    if s.strip()
+}
+BUY_ONLY_SYMBOLS = {
+    s.strip().upper()
+    for s in _str_env(
+        "BUY_ONLY_SYMBOLS",
+        # DOGE/DOT BUY was materially less negative than SELL in the supplied
+        # history. This is a filter, NOT a claim that either direction is
+        # independently profitable. It should be revalidated on fresh data.
+        "DOGEUSDT,DOTUSDT",
     ).split(",")
     if s.strip()
 }
 
-
 def direction_allowed(symbol, direction):
-    """True unless `symbol` is restricted to SELL-only (via
-    SELL_ONLY_SYMBOLS) and `direction` is BUY. Symbols not listed in
-    SELL_ONLY_SYMBOLS are unrestricted (both directions allowed) — this
-    is purely a trading-policy filter applied AFTER analyze_market
-    produces a signal, not a change to the signal-generation logic
-    itself, so it stays a single, auditable choke point (main.py's live
-    loop and scripts/run_backtest.py both call this the same way, so
-    backtest and live behavior stay matched per this repo's existing
-    convention)."""
-    if symbol in SELL_ONLY_SYMBOLS and direction == "BUY":
-        return False
+    """Single audited direction-policy choke point shared by live/backtest."""
+    if symbol in SELL_ONLY_SYMBOLS and symbol in BUY_ONLY_SYMBOLS:
+        return False  # conflicting configuration fails closed
+    if symbol in SELL_ONLY_SYMBOLS:
+        return direction == "SELL"
+    if symbol in BUY_ONLY_SYMBOLS:
+        return direction == "BUY"
     return True
 
 MIN_SIGNAL_PROBABILITY = _bounded_float_env("MIN_SIGNAL_PROBABILITY", 70.0, 0.0, 100.0)
@@ -206,6 +214,17 @@ MIN_REWARD_RISK = _bounded_float_env("MIN_REWARD_RISK", 1.0, 0.1, 20.0)
 # Guards against concentrated directional risk across correlated symbols
 # (see risk_engine.same_direction_open_count) rather than raw trade count.
 MAX_SAME_DIRECTION_OPEN = _positive_int_env("MAX_SAME_DIRECTION_OPEN", 3, minimum=0)
+
+# V27.30 Smart Money / Context Fusion
+SMART_CONTEXT_ENABLED = os.getenv("SMART_CONTEXT_ENABLED", "true").strip().lower() in {"1","true","yes","on"}
+SMART_CONTEXT_MIN_SCORE = _bounded_float_env("SMART_CONTEXT_MIN_SCORE", 0.0, -10.0, 10.0)
+FOOTPRINT_HARD_FILTER = os.getenv("FOOTPRINT_HARD_FILTER", "false").strip().lower() in {"1","true","yes","on"}
+WHALE_FILTER_ENABLED = os.getenv("WHALE_FILTER_ENABLED", "true").strip().lower() in {"1","true","yes","on"}
+FUNDAMENTAL_FILTER_ENABLED = os.getenv("FUNDAMENTAL_FILTER_ENABLED", "true").strip().lower() in {"1","true","yes","on"}
+SESSION_FILTER_ENABLED = os.getenv("SESSION_FILTER_ENABLED", "true").strip().lower() in {"1","true","yes","on"}
+FUNDAMENTAL_HARD_VETO = _positive_int_env("FUNDAMENTAL_HARD_VETO", 3, minimum=0)
+WHALE_BIAS_JSON = os.getenv("WHALE_BIAS_JSON", "")
+WHALE_BIAS_FILE = os.getenv("WHALE_BIAS_FILE", "")
 
 # V27.12 Hybrid AdaptiveTrend overlay (from V31 research)
 ADAPTIVE_TREND_ENABLED = os.getenv("ADAPTIVE_TREND_ENABLED", "true").strip().lower() in {"1","true","yes","on"}
