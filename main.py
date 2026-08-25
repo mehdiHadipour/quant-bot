@@ -272,6 +272,7 @@ from config import (
 from data_engine import fetch_market_klines, fetch_funding_rate, fetch_recent_agg_trades
 from indicators import analyze_market
 from footprint import compute_footprint_metrics, describe_footprint
+from news_provider import fetch_headlines
 from trade_monitor import (
     check_open_trades,
     check_sl_warnings,
@@ -794,9 +795,28 @@ def process_symbol(state, symbol, klines_for_symbol, counters):
         # far more useful than 14 near-identical lines.
         counters["funding_fail_example"] = f"{symbol}: {funding_fail_reason}"
 
+    # V27.30: obtain real recent agg-trade footprint BEFORE the signal gate.
+    # If unavailable, smart_context falls back to the historical-safe candle proxy.
+    footprint_metrics = None
+    if symbol in CRYPTO_SYMBOLS:
+        try:
+            trades_df = fetch_recent_agg_trades(symbol)
+            footprint_metrics = compute_footprint_metrics(trades_df, current_low, current_high)
+        except Exception as e:  # noqa: BLE001
+            log.warning(f"[{symbol}] footprint fetch failed (non-fatal): {e}")
+    signal_ts = None
+    if "close_time" in klines_for_symbol.get("1h", pd.DataFrame()).columns:
+        try:
+            signal_ts = pd.to_datetime(klines_for_symbol["1h"]["close_time"].iloc[-1], unit="ms", utc=True)
+        except Exception:
+            signal_ts = None
+    headlines = []
+    if symbol in CRYPTO_SYMBOLS and os.getenv("FUNDAMENTAL_FILTER_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}:
+        headlines = fetch_headlines(symbol)
     skip_reasons = []
     result = analyze_market(
-        safe_15m, df_1h, df_4h, safe_1d, symbol, funding_rate=funding_rate, reasons=skip_reasons
+        safe_15m, df_1h, df_4h, safe_1d, symbol, funding_rate=funding_rate, reasons=skip_reasons,
+        footprint_metrics=footprint_metrics, timestamp=signal_ts, headlines=headlines
     )
     if not result:
         # v25.2: previously this was a silent skip — the log just moved on
@@ -869,6 +889,15 @@ def process_symbol(state, symbol, klines_for_symbol, counters):
 🧭 تأیید چندتایم‌فریمی: 15m + 1H + 4H + 1D هم‌جهت
 """
 
+    smart = result.get("smart_context") or {}
+    if smart:
+        msg += (f"\n🧠 <b>Smart Context</b>: {smart.get('score', 0):+.0f} | "
+                  f"Pullback {smart.get('pullback_score', 0):+.0f} | "
+                  f"Footprint {smart.get('footprint_score', 0):+.0f} | "
+                  f"Session {smart.get('session', 'N/A')} | "
+                  f"Whale {smart.get('whale_score', 0):+.0f} | "
+                  f"Fundamental {smart.get('fundamental_score', 0):+.0f}\n")
+
     breakdown = result.get("score_breakdown") or {}
     if breakdown:
         breakdown_lines = "\n".join(
@@ -901,21 +930,8 @@ def process_symbol(state, symbol, klines_for_symbol, counters):
             "(احتمال ضعیف‌شدن مومنتوم) — با احتیاط بیشتری تصمیم بگیرید.\n"
         )
 
-    # V27.23: real footprint-derived metrics (data_engine.fetch_recent_agg_trades
-    # + footprint.compute_footprint_metrics), crypto-only (Binance-specific
-    # endpoint; WEEX-routed symbols have no equivalent). INFORMATIONAL
-    # ONLY — see footprint.py's module docstring for why this can't be
-    # backtest-validated against history the way every other signal in
-    # this codebase was, and must not be turned into a hard gate without
-    # first accumulating enough live, forward-observed outcomes.
-    if symbol in CRYPTO_SYMBOLS:
-        try:
-            trades_df = fetch_recent_agg_trades(symbol)
-            footprint_metrics = compute_footprint_metrics(trades_df, current_low, current_high)
-        except Exception as e:  # noqa: BLE001 — never let an experimental, informational feature break a real signal
-            log.warning(f"[{symbol}] footprint fetch/compute failed (non-fatal, informational feature): {e}")
-            footprint_metrics = None
-        msg += f"\n🦶 {describe_footprint(footprint_metrics, direction)}\n"
+    # V27.30: footprint was evaluated before the entry gate; show the same result in the alert.
+    msg += f"\n🦶 {describe_footprint(footprint_metrics, direction)}\n"
 
     msg += build_risk_tip(direction, price, sl, tp)
 
