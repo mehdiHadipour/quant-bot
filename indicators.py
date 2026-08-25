@@ -3,11 +3,15 @@ import pandas as pd
 import ta
 
 from logger import log
+from smart_context import smart_context, load_whale_bias, fundamental_score
 
 from config import (
     MIN_SIGNAL_PROBABILITY, MIN_ADX, ADAPTIVE_TREND_ENABLED,
     ADAPTIVE_FAST_EMA, ADAPTIVE_SLOW_EMA, ADAPTIVE_TARGET_VOL,
     ADAPTIVE_MAX_ASSET_WEIGHT, ADAPTIVE_MIN_RV, ADAPTIVE_MAX_RV,
+    SMART_CONTEXT_ENABLED, SMART_CONTEXT_MIN_SCORE, WHALE_FILTER_ENABLED,
+    FUNDAMENTAL_FILTER_ENABLED, SESSION_FILTER_ENABLED, FOOTPRINT_HARD_FILTER,
+    FUNDAMENTAL_HARD_VETO,
 )
 
 # ema_200 needs a reasonable amount of history to be meaningful; below this
@@ -72,7 +76,7 @@ def get_timeframe_bias(df, min_candles=MIN_CANDLES):
     return "BULL" if ema_50 > ema_200 else "BEAR"
 
 
-def analyze_market(df_15m, df_1h, df_4h, df_1d, symbol, funding_rate=None, reasons=None):
+def analyze_market(df_15m, df_1h, df_4h, df_1d, symbol, funding_rate=None, reasons=None, footprint_metrics=None, timestamp=None, headlines=None):
     """`reasons`, if passed a list, gets a human-readable explanation
     appended every time this returns None — so the caller can log WHY a
     symbol produced no signal this cycle instead of just silence. Optional
@@ -185,6 +189,14 @@ def analyze_market(df_15m, df_1h, df_4h, df_1d, symbol, funding_rate=None, reaso
         liquidity_sweep = "bearish"
     buy_ratio = current_taker_buy_volume / current_volume if current_volume > 0 else 0.5
 
+    # V27.30 context fusion: entry location, order-flow/footprint, session,
+    # optional whale bias and optional fundamental headlines. Missing external
+    # data is neutral; no provider can create a trade by itself.
+    whale_s, whale_reason = load_whale_bias(symbol, "BUY") if WHALE_FILTER_ENABLED else (0, "disabled")
+    # Re-score whale for the actual direction after direction is known; the
+    # provisional BUY read above is intentionally not used as a signal.
+    smart_pre = {"score": 0, "whale_score": 0, "fundamental_score": 0}
+
     # V27.12 Hybrid: the strongest research component from V31 is used as
     # the primary regime engine. 4H EMA(6/18) supplies direction and a
     # 30-day 4H realized-volatility regime controls whether the trend is
@@ -280,6 +292,17 @@ def analyze_market(df_15m, df_1h, df_4h, df_1d, symbol, funding_rate=None, reaso
                 )
 
         adaptive_weight = min(ADAPTIVE_TARGET_VOL / max(rv_4h, 1e-9), ADAPTIVE_MAX_ASSET_WEIGHT)
+        whale_score, whale_reason = load_whale_bias(symbol, adaptive_direction) if WHALE_FILTER_ENABLED else (0, "disabled")
+        fund_score, fund_reason = fundamental_score(symbol, adaptive_direction, headlines) if FUNDAMENTAL_FILTER_ENABLED else (0, "disabled")
+        ctx = smart_context(df_15m, df, adaptive_direction, footprint_metrics=footprint_metrics, timestamp=timestamp, whale_score=whale_score, fundamental_score_value=fund_score)
+        if SESSION_FILTER_ENABLED and ctx["weekend"] and ctx["session_score"] < 0:
+            ctx["score"] -= 1
+        if FUNDAMENTAL_FILTER_ENABLED and fund_score <= -FUNDAMENTAL_HARD_VETO:
+            return _skip(f"AdaptiveTrend: خبر بنیادی شدیداً مخالف جهت ({fund_score})")
+        if SMART_CONTEXT_ENABLED and ctx["score"] < SMART_CONTEXT_MIN_SCORE:
+            return _skip(f"SmartContext: امتیاز زمینه {ctx['score']} < حداقل {SMART_CONTEXT_MIN_SCORE}")
+        if FOOTPRINT_HARD_FILTER and ctx["footprint_score"] < 0:
+            return _skip("Footprint: فشار سفارشات خلاف جهت ورود")
         return {
             "symbol": symbol,
             "direction": adaptive_direction,
@@ -299,6 +322,9 @@ def analyze_market(df_15m, df_1h, df_4h, df_1d, symbol, funding_rate=None, reaso
             },
             "adaptive_rv": rv_4h,
             "adaptive_weight": adaptive_weight,
+            "smart_context": ctx,
+            "whale_reason": whale_reason,
+            "fundamental_reason": fund_reason,
         }
 
     # --- Hard filter: skip ranging / weak-trend markets ---
@@ -520,6 +546,20 @@ def analyze_market(df_15m, df_1h, df_4h, df_1d, symbol, funding_rate=None, reaso
                     f"(قیمت {current_15m_close:,.2f} بالای EMA20 پانزده‌دقیقه‌ای {ema_20_15m:,.2f})"
                 )
 
+    # V27.30 Smart Context for the legacy scorer too.
+    whale_score, whale_reason = load_whale_bias(symbol, direction) if WHALE_FILTER_ENABLED else (0, "disabled")
+    fund_score, fund_reason = fundamental_score(symbol, direction, headlines) if FUNDAMENTAL_FILTER_ENABLED else (0, "disabled")
+    ctx = smart_context(df_15m, df, direction, footprint_metrics=footprint_metrics, timestamp=timestamp, whale_score=whale_score, fundamental_score_value=fund_score)
+    if SESSION_FILTER_ENABLED and ctx["weekend"] and ctx["session_score"] < 0:
+        ctx["score"] -= 1
+    if FUNDAMENTAL_FILTER_ENABLED and fund_score <= -FUNDAMENTAL_HARD_VETO:
+        return _skip(f"خبر بنیادی شدیداً مخالف جهت ({fund_score})")
+    if SMART_CONTEXT_ENABLED and ctx["score"] < SMART_CONTEXT_MIN_SCORE:
+        return _skip(f"SmartContext: امتیاز زمینه {ctx['score']} < حداقل {SMART_CONTEXT_MIN_SCORE}")
+    if FOOTPRINT_HARD_FILTER and ctx["footprint_score"] < 0:
+        return _skip("Footprint: فشار سفارشات خلاف جهت ورود")
+    total_score += ctx["score"]
+
     # v27.8: a compact breakdown of which factors contributed to the
     # score, so a FIRED signal's reasoning is visible too — not just the
     # no-signal diagnostics added in v25.2. Requested after real trades
@@ -540,4 +580,4 @@ def analyze_market(df_15m, df_1h, df_4h, df_1d, symbol, funding_rate=None, reaso
     score_breakdown = {k: v for k, v in score_breakdown.items() if v != 0}
     score_breakdown = dict(sorted(score_breakdown.items(), key=lambda kv: abs(kv[1]), reverse=True))
 
-    return {"direction": direction, "buy": buy_prob, "sell": sell_prob, "neutral": neutral_prob, "atr": atr, "price": current_close, "symbol": symbol, "adx": adx, "divergence": divergence, "buy_ratio": buy_ratio, "fvg": fvg, "vwap": vwap, "funding_rate": funding_rate, "liquidity_sweep": liquidity_sweep, "score_breakdown": score_breakdown, "total_score": total_score}
+    return {"direction": direction, "buy": buy_prob, "sell": sell_prob, "neutral": neutral_prob, "atr": atr, "price": current_close, "symbol": symbol, "adx": adx, "divergence": divergence, "buy_ratio": buy_ratio, "fvg": fvg, "vwap": vwap, "funding_rate": funding_rate, "liquidity_sweep": liquidity_sweep, "score_breakdown": score_breakdown, "total_score": total_score, "smart_context": ctx, "whale_reason": whale_reason, "fundamental_reason": fund_reason}
