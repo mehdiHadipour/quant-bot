@@ -3,17 +3,26 @@ on:
   workflow_dispatch:
     inputs:
       symbols:
-        description: 'Comma-separated crypto symbols with historical CSVs in backtest_data/'
+        description: 'Comma-separated crypto symbols to fetch and backtest'
         required: true
-        default: 'BNBUSDT,SOLUSDT,DOGEUSDT,AVAXUSDT,LINKUSDT,DOTUSDT,ZECUSDT,NEARUSDT'
+        default: 'BNBUSDT,BTCUSDT,ETHUSDT,SOLUSDT,DOGEUSDT,AVAXUSDT,LINKUSDT,DOTUSDT,ZECUSDT,NEARUSDT'
       data_dir:
         description: 'Historical data directory'
         required: true
         default: 'backtest_data'
+      days:
+        description: 'Days of historical data to fetch (skip fetch if you already have fresh CSVs)'
+        required: true
+        default: '180'
+      skip_fetch:
+        description: 'Skip downloading data and use whatever is already in data_dir'
+        required: true
+        type: boolean
+        default: false
 jobs:
   backtest:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
@@ -23,11 +32,15 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Validate project
         run: python scripts/validate_project.py
+      - name: Fetch historical klines
+        if: ${{ inputs.skip_fetch != true }}
+        run: |
+          python scripts/fetch_historical_klines.py --symbols "${{ inputs.symbols }}" --days "${{ inputs.days }}" --out-dir "${{ inputs.data_dir }}"
       - name: Run portfolio backtest
         env:
           SMART_CONTEXT_ENABLED: 'true'
           SMART_CONTEXT_MIN_SCORE: '0'
-          FOOTPRINT_HARD_FILTER: 'false'
+          FOOTPRINT_HARD_FILTER: 'true'
           WHALE_FILTER_ENABLED: 'true'
           FUNDAMENTAL_FILTER_ENABLED: 'true'
           SESSION_FILTER_ENABLED: 'true'
@@ -41,3 +54,4 @@ jobs:
           path: |
             backtest_v27_30.txt
             backtest_reports/
+            ${{ inputs.data_dir }}/
