@@ -1,0 +1,43 @@
+name: Quant Bot Backtest V27.30
+on:
+  workflow_dispatch:
+    inputs:
+      symbols:
+        description: 'Comma-separated crypto symbols with historical CSVs in backtest_data/'
+        required: true
+        default: 'BNBUSDT,SOLUSDT,DOGEUSDT,AVAXUSDT,LINKUSDT,DOTUSDT,ZECUSDT,NEARUSDT'
+      data_dir:
+        description: 'Historical data directory'
+        required: true
+        default: 'backtest_data'
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Validate project
+        run: python scripts/validate_project.py
+      - name: Run portfolio backtest
+        env:
+          SMART_CONTEXT_ENABLED: 'true'
+          SMART_CONTEXT_MIN_SCORE: '0'
+          FOOTPRINT_HARD_FILTER: 'false'
+          WHALE_FILTER_ENABLED: 'true'
+          FUNDAMENTAL_FILTER_ENABLED: 'true'
+          SESSION_FILTER_ENABLED: 'true'
+          FUNDAMENTAL_HARD_VETO: '3'
+          SYMBOLS: ${{ inputs.symbols }}
+        run: |
+          python scripts/run_backtest.py --symbols "${{ inputs.symbols }}" --data-dir "${{ inputs.data_dir }}" | tee backtest_v27_30.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: quant-bot-v27-30-backtest
+          path: |
+            backtest_v27_30.txt
+            backtest_reports/
