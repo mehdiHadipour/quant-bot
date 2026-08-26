@@ -75,7 +75,6 @@ def candle_orderflow_score(df_1h, direction):
     body = abs(float(row.close) - float(row.open))
     upper = float(row.high) - max(float(row.open), float(row.close))
     lower = min(float(row.open), float(row.close)) - float(row.low)
-    s = _direction_sign(direction)
     score = 0
     if direction == "BUY" and ratio >= .56:
         score += 1
