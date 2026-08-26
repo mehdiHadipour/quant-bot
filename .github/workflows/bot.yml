@@ -1,0 +1,74 @@
+name: Quant Bot V27.30
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '4-59/10 * * * *'
+permissions:
+  contents: write
+concurrency:
+  group: quant-bot-cycle
+  cancel-in-progress: false
+jobs:
+  trading_bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Validate project
+        run: python scripts/validate_project.py
+      - name: Run bot
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT: ${{ secrets.TELEGRAM_CHAT }}
+          ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
+          SYMBOLS: ${{ vars.SYMBOLS || 'BNBUSDT,SOLUSDT,DOGEUSDT,AVAXUSDT,LINKUSDT,DOTUSDT,ZECUSDT,NEARUSDT' }}
+          SELL_ONLY_SYMBOLS: ${{ vars.SELL_ONLY_SYMBOLS || 'BNBUSDT,SOLUSDT,AVAXUSDT,LINKUSDT,NEARUSDT,ZECUSDT' }}
+          BUY_ONLY_SYMBOLS: ${{ vars.BUY_ONLY_SYMBOLS || 'DOGEUSDT,DOTUSDT' }}
+          SMART_CONTEXT_ENABLED: ${{ vars.SMART_CONTEXT_ENABLED || 'true' }}
+          SMART_CONTEXT_MIN_SCORE: ${{ vars.SMART_CONTEXT_MIN_SCORE || '0' }}
+          FOOTPRINT_HARD_FILTER: ${{ vars.FOOTPRINT_HARD_FILTER || 'false' }}
+          WHALE_FILTER_ENABLED: ${{ vars.WHALE_FILTER_ENABLED || 'true' }}
+          FUNDAMENTAL_FILTER_ENABLED: ${{ vars.FUNDAMENTAL_FILTER_ENABLED || 'true' }}
+          SESSION_FILTER_ENABLED: ${{ vars.SESSION_FILTER_ENABLED || 'true' }}
+          FUNDAMENTAL_HARD_VETO: ${{ vars.FUNDAMENTAL_HARD_VETO || '3' }}
+          WHALE_BIAS_JSON: ${{ vars.WHALE_BIAS_JSON || '' }}
+          WHALE_BIAS_FILE: ${{ vars.WHALE_BIAS_FILE || '' }}
+          MIN_SIGNAL_PROBABILITY: ${{ vars.MIN_SIGNAL_PROBABILITY || '70' }}
+          MIN_ADX: ${{ vars.MIN_ADX || '25' }}
+          ATR_SL_MULTIPLIER: ${{ vars.ATR_SL_MULTIPLIER || '1.8' }}
+          ATR_TP_MULTIPLIER: ${{ vars.ATR_TP_MULTIPLIER || '1.8' }}
+          RISK_PERCENT_PER_TRADE: ${{ vars.RISK_PERCENT_PER_TRADE || '1.0' }}
+          SL_WARNING_THRESHOLD: ${{ vars.SL_WARNING_THRESHOLD || '0.8' }}
+          TRAILING_TRIGGER_R: ${{ vars.TRAILING_TRIGGER_R || '0.5' }}
+          PARTIAL_LOCK_TRIGGER_R: ${{ vars.PARTIAL_LOCK_TRIGGER_R || '0.75' }}
+          PARTIAL_LOCK_R: ${{ vars.PARTIAL_LOCK_R || '0.5' }}
+          NEAR_TP_LOCK_TRIGGER_R: ${{ vars.NEAR_TP_LOCK_TRIGGER_R || '0.90' }}
+          NEAR_TP_LOCK_R: ${{ vars.NEAR_TP_LOCK_R || '0.70' }}
+          TIME_STOP_SCHEDULE: ${{ vars.TIME_STOP_SCHEDULE || '4:0.10,8:0.30' }}
+          CYCLE_MINUTES: ${{ vars.CYCLE_MINUTES || '10' }}
+          SILENCE_GAP_MULTIPLIER: ${{ vars.SILENCE_GAP_MULTIPLIER || '6' }}
+          SYMBOL_COOLDOWN_CYCLES: ${{ vars.SYMBOL_COOLDOWN_CYCLES || '6' }}
+          MAX_CONCURRENT_TRADES: ${{ vars.MAX_CONCURRENT_TRADES || '4' }}
+          MAX_DAILY_LOSS_R: ${{ vars.MAX_DAILY_LOSS_R || '3' }}
+          MAX_OPEN_RISK_R: ${{ vars.MAX_OPEN_RISK_R || '4' }}
+          MIN_REWARD_RISK: ${{ vars.MIN_REWARD_RISK || '1.0' }}
+          MAX_SAME_DIRECTION_OPEN: ${{ vars.MAX_SAME_DIRECTION_OPEN || '3' }}
+          ADAPTIVE_TREND_ENABLED: ${{ vars.ADAPTIVE_TREND_ENABLED || 'true' }}
+          ADAPTIVE_FAST_EMA: ${{ vars.ADAPTIVE_FAST_EMA || '6' }}
+          ADAPTIVE_SLOW_EMA: ${{ vars.ADAPTIVE_SLOW_EMA || '18' }}
+          ADAPTIVE_TARGET_VOL: ${{ vars.ADAPTIVE_TARGET_VOL || '0.20' }}
+          ADAPTIVE_MAX_ASSET_WEIGHT: ${{ vars.ADAPTIVE_MAX_ASSET_WEIGHT || '1.0' }}
+          ADAPTIVE_MIN_RV: ${{ vars.ADAPTIVE_MIN_RV || '0.10' }}
+          ADAPTIVE_MAX_RV: ${{ vars.ADAPTIVE_MAX_RV || '2.0' }}
+          MAX_OPEN_PER_MARKET_GROUP: ${{ vars.MAX_OPEN_PER_MARKET_GROUP || '2' }}
+          DIVERSIFICATION_ENABLED: ${{ vars.DIVERSIFICATION_ENABLED || 'true' }}
+        run: python main.py
+      - name: Lint
+        run: |
+          pip install ruff
+          ruff check .
