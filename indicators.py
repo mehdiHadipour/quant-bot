@@ -195,7 +195,6 @@ def analyze_market(df_15m, df_1h, df_4h, df_1d, symbol, funding_rate=None, reaso
     whale_s, whale_reason = load_whale_bias(symbol, "BUY") if WHALE_FILTER_ENABLED else (0, "disabled")
     # Re-score whale for the actual direction after direction is known; the
     # provisional BUY read above is intentionally not used as a signal.
-    smart_pre = {"score": 0, "whale_score": 0, "fundamental_score": 0}
 
     # V27.12 Hybrid: the strongest research component from V31 is used as
     # the primary regime engine. 4H EMA(6/18) supplies direction and a
