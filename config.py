@@ -84,19 +84,42 @@ _symbol_list = [
 ]
 SYMBOLS = list(dict.fromkeys(_symbol_list + list(CORE_SYMBOLS)))
 
-# --- WEEX "TradFi" tokenized products (gold, silver, tokenized US stocks),
-# fetched via weex_data_engine instead of Binance. Only symbols actually
-# confirmed to exist (from the user's own WEEX app screenshots / WEEX's
-# public docs) are hard-coded as defaults -- no guessed forex or oil/gas
-# tickers, since a wrong ticker string would just fail to fetch every
-# cycle. Override/extend via the WEEX_SYMBOLS repo variable once you've
-# confirmed exact ticker strings for anything else you want added.
+# --- WEEX "TradFi" tokenized products (gold, oil/gas, forex, tokenized US
+# stocks, indices), fetched via weex_data_engine instead of Binance. This
+# default list was built from the user's own WEEX app screenshots (2026-08-27)
+# covering every TradFi sub-tab: کالاها (commodities), فلزات (metals), فارکس
+# (forex), سهام (stocks), شاخص‌ها (indices), Pre-IPO.
+#
+# WEEX lists several *duplicate* instruments for the same underlying asset
+# (e.g. gold as XAUUSDT, GOLD(XAUT)USDT, and GOLD(PAXG)USDT all at once) --
+# only one representative per asset is kept here to avoid three near-identical
+# correlated signals firing for the same move. The full confirmed list is
+# documented in the README; add any of them via the WEEX_SYMBOLS repo
+# variable. Adding all ~37 at once would roughly triple every 5-minute
+# cycle's request count against the current 8-minute job timeout, so this
+# default is deliberately a curated "top pick per category", not the full set.
+#
+# XAGUSDT (silver) is the one inferred-not-directly-confirmed entry here: WEEX
+# shows it in the app as "SILVER(XAG)USDT", and every other paren-labeled
+# instrument observed (GOLD(PAXG)USDT -> PAXGUSDT, GOLD(XAUT)USDT -> XAUTUSDT)
+# follows a confirmed "ticker in parens = the real API symbol" pattern, but
+# XAGUSDT itself wasn't independently seen written out plainly. It fails soft
+# (skips that symbol, logs a warning) if the ticker turns out to be wrong.
 WEEX_ENABLED = _str_env("WEEX_ENABLED", "1").strip().lower() not in {"0", "false", "no", "off"}
 _weex_symbol_list = [
     s.strip().upper()
     for s in _str_env(
         "WEEX_SYMBOLS",
-        "XAUTUSDT,PAXGUSDT,SLVONUSDT,NVDAUSDT,AAPLUSDT,COINUSDT",
+        # Metals: gold, silver, copper
+        "XAUUSDT,XAGUSDT,COPPERUSDT,"
+        # Energy: WTI crude, natural gas
+        "CLUSDT,NATGASUSDT,"
+        # Forex: the 4 most-traded USD pairs
+        "EURUSDT,GBPUSDT,JPYUSDT,AUDUSDT,"
+        # Tokenized stocks: large-cap, liquid, volatile names
+        "NVDAUSDT,AAPLUSDT,TSLAUSDT,AMZNUSDT,COINUSDT,"
+        # Broad-market indices
+        "SPYUSDT,QQQUSDT",
     ).split(",")
     if s.strip()
 ]
