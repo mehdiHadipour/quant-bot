@@ -62,15 +62,49 @@ year-old backtest candle would be look-ahead bias, the same reason
 `NEWS_ENABLED=0` in backtests above.
 
 **WEEX TradFi tokenized products** (`weex_data_engine.py`) add gold, silver,
-and tokenized US stocks to the tradable universe, fetched from WEEX's public
-spot kline API (`api-spot.weex.com`) instead of Binance. Default
-`WEEX_SYMBOLS`: `XAUTUSDT, PAXGUSDT, SLVONUSDT, NVDAUSDT, AAPLUSDT, COINUSDT`
-— only symbols confirmed to actually exist on WEEX. Set `WEEX_ENABLED=0` to
-disable, or override `WEEX_SYMBOLS` once you've confirmed exact ticker
-strings for anything else (e.g. oil/gas or additional tokenized stocks) —
-WEEX does not offer traditional forex currency pairs, so none are included.
-These are tokenized/synthetic USDT-settled instruments tracking the
-underlying price, not the underlying commodity or equity itself, and this
-uses WEEX's **spot** klines (not its separate perpetual-futures contract
-API) as price input for analysis.
+oil/gas, forex, tokenized US stocks, and indices to the tradable universe,
+fetched from WEEX's public spot kline API (`api-spot.weex.com`) instead of
+Binance. This uses WEEX's **spot** klines (not its separate perpetual-futures
+contract API) as price input, and these are tokenized/synthetic USDT-settled
+instruments tracking the underlying price, not the underlying commodity,
+currency, or equity itself.
+
+Default `WEEX_SYMBOLS` (one representative per asset, to avoid firing several
+near-identical correlated signals for the same underlying move):
+`XAUUSDT, XAGUSDT, COPPERUSDT` (metals), `CLUSDT, NATGASUSDT` (energy),
+`EURUSDT, GBPUSDT, JPYUSDT, AUDUSDT` (forex), `NVDAUSDT, AAPLUSDT, TSLAUSDT,
+AMZNUSDT, COINUSDT` (stocks), `SPYUSDT, QQQUSDT` (indices).
+
+Full confirmed WEEX TradFi list (from the user's own app screenshots,
+2026-08-27) if you want to override `WEEX_SYMBOLS` with more:
+- Commodities: `NGUSDT`, `NATGASUSDT`, `CLUSDT` (WTI oil), the Brent-oil one
+  shown as "OIL(BZ)USDT" in-app (ticker inferred as `BZUSDT`, unverified)
+- Metals: `XAUUSDT`, `XAGUSDT`* (silver, inferred), `COPPERUSDT`, `XCUUSDT`
+  (a second copper listing), `SLVUSDT` (iShares Silver ETF), `PAXGUSDT` /
+  `XAUTUSDT` (two more tokenized-gold variants), `XPDUSDT`* (palladium,
+  inferred), `XPTUSDT`* (platinum, inferred), `XALUSDT`* (aluminium, inferred)
+- Forex: `EURUSDT`, `GBPUSDT`, `JPYUSDT`, `AUDUSDT`, `CADUSDT`, `CHFUSDT`,
+  `BRLUSDT`
+- Stocks: `NVDAUSDT`, `AAPLUSDT`, `TSLAUSDT`, `AMZNUSDT`, `COINUSDT`,
+  `MSTRUSDT`, `ORCLUSDT`, `PLTRUSDT`, `FUTUUSDT`, `RDDTUSDT`
+- Indices: `SPYUSDT`, `QQQUSDT`, `TQQQUSDT` (3x leveraged), `SOXXUSDT`,
+  `SOXLUSDT` (3x leveraged), `XLEUSDT`, `EWJUSDT`, `EWYUSDT`, `EWTUSDT`,
+  `IEFAUSDT`
+- Pre-IPO (illiquid/highly volatile -- not recommended for an automated
+  technical-analysis bot, included here only for completeness):
+  `ANTHROPICUSDT`, `OPENAIUSDT`, `ENFLAMEUSDT`, `MOONSHOTUSDT`
+
+\* = ticker inferred from WEEX's own consistent in-app naming pattern
+("COMMONNAME(TICKER)USDT" -> the API symbol is TICKER+USDT, confirmed
+directly for PAXG and XAUT), not independently verified against the live
+API. If wrong, that single symbol just fails to fetch and is skipped
+(logged as a WARNING) -- it cannot break fetching for any other symbol.
+
+Adding many more of these at once meaningfully increases every 5-minute
+cycle's request count (`fetch_all_klines` fetches 4 timeframes per symbol).
+The `bot.yml` job timeout was raised from 8 to 12 minutes and the
+kline-fetch thread pool from 12 to 24 workers to give headroom for the
+larger default symbol set; widen further if you add most/all of the list
+above. `WEEX_ENABLED=0` disables all WEEX symbols entirely.
+
 
