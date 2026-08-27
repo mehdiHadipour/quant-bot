@@ -152,4 +152,26 @@ function — can never again pass CI silently.
   faster iteration loop, or use `skip_fetch: true` to reuse data already
   in `backtest_data/` from a previous run.
 
+## V28.5 — Historical fetch was serial and blew past the job timeout
+
+`scripts/fetch_historical_klines.py` fetched every (symbol, interval)
+combination one at a time -- 30 symbols x 4 intervals = 120 sequential
+HTTP round-trips, each itself paginating page-by-page with a polite sleep
+between calls. With the default 30-symbol universe this took 20+ minutes
+just for the fetch step alone, leaving the actual backtest computation no
+room before the job's `timeout-minutes` cancelled the whole run outright
+(observed: "Fetch historical klines" 20m16s, then "Backtest" force-killed
+after 9m41s at the 30-minute job ceiling).
+
+Fixed by fetching all (symbol, interval) jobs concurrently with a thread
+pool (`--workers`, default 12) instead of one at a time -- a mocked timing
+test confirms this is dramatically faster than the old serial loop. Also:
+retry/backoff on a failed page was widened (3 attempts -> 6, with
+increasing backoff) since concurrent load makes transient rate-limit
+hiccups on any single job more likely, so one job doesn't silently lose
+data it would have gotten with a bit more patience. The workflow's
+default `days` was also lowered from 180 to 90 for a faster default run
+(raise it explicitly for a more thorough backtest), and `timeout-minutes`
+raised from 30 to 45 for headroom on top of the parallelized fetch.
+
 
