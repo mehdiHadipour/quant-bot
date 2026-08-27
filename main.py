@@ -443,7 +443,7 @@ def fetch_all_klines(symbols):
     jobs = {}
     results = {symbol: {interval: None for interval in INTERVALS} for symbol in symbols}
 
-    with ThreadPoolExecutor(max_workers=min(12, len(symbols) * len(INTERVALS) or 1)) as executor:
+    with ThreadPoolExecutor(max_workers=min(24, len(symbols) * len(INTERVALS) or 1)) as executor:
         for symbol in symbols:
             for interval in INTERVALS:
                 jobs[executor.submit(fetch_klines, symbol, interval)] = (symbol, interval)
