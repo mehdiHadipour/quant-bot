@@ -4,6 +4,26 @@ import pandas as pd
 from smart_context import footprint_proxy, session_context, evaluate
 
 class SmartContextTests(unittest.TestCase):
+    # Unit tests must be deterministic and must not depend on real network
+    # access or today's live news content. evaluate() calls
+    # news_provider.fundamental_score() whenever no FUNDAMENTAL sidecar is
+    # supplied, which -- if NEWS_ENABLED is left at its "live" default --
+    # makes a real Google News RSS request. In an offline dev sandbox that
+    # request simply fails and silently scores 0 (accidentally looking
+    # deterministic); in real CI (with real internet) it can genuinely
+    # match unrelated live articles for a made-up symbol like "TESTUSDT"
+    # and return a non-zero score, making any test around it flaky. Force
+    # it off for the whole test class instead of relying on that accident.
+    def setUp(self):
+        self._old_news_enabled = os.environ.get("NEWS_ENABLED")
+        os.environ["NEWS_ENABLED"] = "0"
+
+    def tearDown(self):
+        if self._old_news_enabled is None:
+            os.environ.pop("NEWS_ENABLED", None)
+        else:
+            os.environ["NEWS_ENABLED"] = self._old_news_enabled
+
     def test_footprint_neutral_without_data(self):
         self.assertEqual(footprint_proxy(None)["bias"], "NEUTRAL")
 
