@@ -9,7 +9,7 @@ on:
       days:
         description: 'Days of historical data to fetch'
         required: true
-        default: '180'
+        default: '500'
       skip_fetch:
         description: 'Skip downloading data and use whatever is already in backtest_data/'
         required: true
@@ -20,7 +20,7 @@ permissions:
 jobs:
   backtest:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 200
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
