@@ -14,6 +14,7 @@ Usage:
     python scripts/fetch_historical_klines.py --all --days 90
 """
 import argparse
+import math
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -25,6 +26,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from config import SYMBOLS, WEEX_SYMBOLS  # noqa: E402
+from indicators import MIN_CANDLES  # noqa: E402
 
 BINANCE_BASE_URLS = [
     "https://data-api.binance.vision/api/v3/klines",
@@ -39,7 +41,34 @@ INTERVAL_MS = {
     "4h": 4 * 3600 * 1000,
     "1d": 24 * 3600 * 1000,
 }
+# analyze_market() requires at least MIN_CANDLES (indicators.py, currently
+# 210) of history on the 1H, 4H, AND 1D timeframes before it will produce
+# ANY signal -- get_timeframe_bias(df_1d) silently returns None (and the
+# 1D-confirmation gate then always rejects) until df_1d itself has 210
+# candles, i.e. 210 *days*. A `--days 90` (or even the old `--days 180`)
+# fetch only ever gave the 1D CSV 90 (or 180) rows -- always short of 210
+# -- so EVERY signal that reached the 1D gate was silently and permanently
+# rejected for the entire simulation window, regardless of market
+# conditions. Live trading doesn't hit this: main.py always fetches up to
+# 300 candles per timeframe (data_engine.fetch_klines's default limit),
+# comfortably above 210 on every timeframe including 1D. To match that
+# here, each interval's fetch window is the requested --days *plus* enough
+# extra lead-in days to cover MIN_CANDLES candles of warm-up on that
+# timeframe -- so by the first day of the actual --days simulation window,
+# every timeframe already has full indicator history.
+_WARMUP_DAYS = {
+    interval: math.ceil(MIN_CANDLES * ms / (24 * 3600 * 1000))
+    for interval, ms in INTERVAL_MS.items()
+}
 _WEEX_SET = set(WEEX_SYMBOLS)
+# Flat safety margin added on top of each interval's own warmup: the 1H
+# walk-forward loop's own earliest tick is itself a few days before
+# "now - days" (its own ~9-day warmup), and the 4H/1D warmup requirement
+# applies relative to THAT earliest tick, not to "now" -- so without this,
+# the very first few days of the requested window could still fall a
+# little short on 1D history. A flat buffer is simpler and safer than
+# compounding each interval's warmup into every other interval's.
+_SAFETY_MARGIN_DAYS = 15
 
 
 def _rows_to_df(rows):
@@ -115,7 +144,8 @@ def fetch_historical(symbol, interval, days, limit=1000):
 
 def _fetch_and_save(symbol, interval, days, out_dir):
     source = "WEEX" if symbol in _WEEX_SET else "Binance"
-    df = fetch_historical(symbol, interval, days)
+    total_days = days + _WARMUP_DAYS[interval] + _SAFETY_MARGIN_DAYS
+    df = fetch_historical(symbol, interval, total_days)
     out_path = out_dir / f"{symbol}_{interval}.csv"
     if df is None or df.empty:
         return symbol, interval, source, 0, out_path
@@ -145,7 +175,11 @@ def main():
 
     jobs = [(symbol, interval) for symbol in symbols for interval in INTERVALS]
     print(f"Fetching {len(jobs)} (symbol, interval) combinations "
-          f"across {len(symbols)} symbol(s) with {args.workers} parallel workers, {args.days}d each...")
+          f"across {len(symbols)} symbol(s) with {args.workers} parallel workers...")
+    print(f"Requested simulation window: {args.days}d. Actual fetch per interval "
+          f"(includes indicator warm-up so the full {args.days}d window is tradable "
+          f"from day 1): "
+          + ", ".join(f"{i}={args.days + _WARMUP_DAYS[i] + _SAFETY_MARGIN_DAYS}d" for i in INTERVALS))
 
     done = 0
     warnings = 0
