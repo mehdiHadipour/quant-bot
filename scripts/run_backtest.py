@@ -56,12 +56,12 @@ from config import (  # noqa: E402
     MAX_DAILY_LOSS_R, MAX_OPEN_RISK_R, MIN_REWARD_RISK, MAX_SAME_DIRECTION_OPEN,
     MAX_CONCURRENT_TRADES,
 )
-from indicators import analyze_market  # noqa: E402
+from indicators import analyze_market, MIN_CANDLES  # noqa: E402
 from trade_monitor import check_open_trades, check_trailing_stop  # noqa: E402
 from risk_engine import can_open_trade  # noqa: E402
 
 INTERVALS = ["15m", "1h", "4h", "1d"]
-MIN_1H_HISTORY = 60  # enough bars for the slower indicators to warm up
+MIN_1H_HISTORY = MIN_CANDLES  # matches analyze_market's own len(df_1h) requirement -- no point calling it before this
 
 
 def load_symbol_data(data_dir, symbol):
