@@ -175,3 +175,34 @@ default `days` was also lowered from 180 to 90 for a faster default run
 raised from 30 to 45 for headroom on top of the parallelized fetch.
 
 
+
+## V28.6 — CRITICAL fix: the backtest could never produce a single signal
+
+The first real backtest run (30 symbols, 90 days) closed **zero** trades.
+Root cause, confirmed by replaying the exact same gate logic against the
+real fetched data: `analyze_market()` requires `MIN_CANDLES` (210) candles
+of history on **every** timeframe it checks, including 1D — but
+`fetch_historical_klines.py --days 90` only ever gave the 1D CSV 90 rows.
+`get_timeframe_bias(df_1d)` silently returns `None` whenever
+`len(df_1d) < 210`, and the 1D-confirmation gate then unconditionally
+rejects every signal (`daily_bias is None` always fails the check). Since
+210 daily candles means 210 *days*, and the old default (even the
+original 180 before V28.5) never fetched that much 1D history, **this
+gate could never once pass, for any symbol, at any default `--days`
+setting** — the backtest was structurally guaranteed to close zero trades
+regardless of market conditions. Live trading was never affected by this
+specific issue: `main.py` always fetches up to 300 candles per timeframe
+live, comfortably above 210 even on 1D.
+
+Fixed in `fetch_historical_klines.py`: each interval now fetches
+`--days` (the actual simulation window) *plus* however many extra
+lead-in days that timeframe needs to have `MIN_CANDLES` of warm-up
+available from day 1 of the window, plus a small flat safety margin. For
+a 90-day simulation this means fetching roughly 15m=108d, 1h=114d,
+4h=140d, and **1d=315d** — the 1D fetch is now deliberately much larger
+than the requested window, because 210 of those days are pure warm-up the
+1D-confirmation gate needs before it can ever agree or disagree with the
+4H bias. `run_backtest.py`'s own tick-skip threshold
+(`MIN_1H_HISTORY`) was also changed from an arbitrary `60` to import the
+real `indicators.MIN_CANDLES` constant directly, so the two stay in sync
+by construction instead of by coincidence.
