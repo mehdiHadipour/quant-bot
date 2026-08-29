@@ -1,0 +1,63 @@
+name: Quant Bot - Backtest Validation
+on:
+  workflow_dispatch:
+    inputs:
+      symbols:
+        description: 'Comma-separated symbols to backtest (blank = all configured symbols)'
+        required: false
+        default: ''
+      days:
+        description: 'Days of historical data to fetch (lower = faster; raise for more thorough backtests)'
+        required: true
+        default: '90'
+      skip_fetch:
+        description: 'Skip downloading data and use whatever is already in backtest_data/'
+        required: true
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Validate project
+        run: python scripts/validate_project.py
+      - name: System audit
+        run: python scripts/system_audit.py
+      - name: Compile
+        run: python -m compileall -q .
+      - name: Unit tests
+        run: python -m unittest discover -s tests -p 'test_*.py'
+      - name: Fetch historical klines
+        if: ${{ inputs.skip_fetch != true }}
+        run: |
+          python scripts/fetch_historical_klines.py --symbols "${{ inputs.symbols }}" --days "${{ inputs.days }}" --out-dir backtest_data | tee fetch_report.txt
+      - name: Backtest
+        env:
+          SMART_CONTEXT_MODE: backtest
+          SMART_CONTEXT_ENABLED: "1"
+          NEWS_ENABLED: "0"
+          SESSION_VETO_ENABLED: "0"
+          MIN_SESSION_QUALITY: "0"
+          ENABLE_DIRECTION_POLICY: "0"
+        run: |
+          python scripts/run_backtest.py --symbols "${{ inputs.symbols }}" --data-dir backtest_data | tee backtest_report.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: quant-bot-v28-backtest
+          path: |
+            fetch_report.txt
+            backtest_report.txt
+            backtest_results.csv
+            backtest_data/
+
