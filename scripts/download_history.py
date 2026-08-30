@@ -151,9 +151,27 @@ def main():
     ap.add_argument("--out-dir", default=str(ROOT / "backtest_data"), help="Output directory (default: backtest_data/).")
     args = ap.parse_args()
 
-    end_dt = datetime.strptime(args.end, "%Y-%m-%d").replace(tzinfo=timezone.utc) if args.end else datetime.now(timezone.utc)
+    def _parse_date(value: str, flag: str) -> datetime:
+        try:
+            return datetime.strptime(value, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except ValueError:
+            # A bare traceback here (e.g. "time data '2' does not match
+            # format") is confusing on a phone screen and doesn't say
+            # what to actually type. This is almost always someone
+            # putting a bare year/number into the wrong workflow_dispatch
+            # field instead of a full date, or leaving start_date set
+            # from a previous manual run -- spell out the fix directly.
+            print(
+                f"ERROR: {flag} must be a full date like 2025-01-31 (YYYY-MM-DD), "
+                f"got {value!r}. If you only wanted to set how many years back "
+                f"to fetch, leave start_date EMPTY and use the years input instead.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+    end_dt = _parse_date(args.end, "--end") if args.end else datetime.now(timezone.utc)
     if args.start:
-        start_dt = datetime.strptime(args.start, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        start_dt = _parse_date(args.start, "--start")
     else:
         years = args.years if args.years is not None else 2.0
         start_dt = end_dt - timedelta(days=365.25 * years)
