@@ -24,6 +24,16 @@ def main():
         raise SystemExit("No WEEX_TRADFI_BACKTEST_RESULTS.csv; run scripts/weex_tradfi_backtest.py first.")
     df = pd.read_csv(INFILE)
     approved=[]; policies={}
+    # Defensive guard: if the backtest produced zero rows (or, from an
+    # older run, still has the legacy non-CSV placeholder), there's no
+    # "symbol" column to group by. That's a normal "nothing to approve
+    # this run" outcome, not an error — write an empty approval file
+    # instead of letting df.groupby("symbol") raise KeyError: 'symbol'.
+    if df.empty or "symbol" not in df.columns:
+        OUT.parent.mkdir(parents=True, exist_ok=True)
+        OUT.write_text(json.dumps({"approved_symbols": [], "policies": {}}, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(json.dumps({"approved_symbols": [], "count": 0}, ensure_ascii=False))
+        return
     for sym,g in df.groupby("symbol"):
         r=pd.to_numeric(g.r_multiple, errors="coerce").dropna()
         eq=r.cumsum(); dd=float((eq.cummax()-eq).max()) if len(r) else 0.0
