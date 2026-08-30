@@ -1,0 +1,27 @@
+Quant Bot V30.2 — ICT Full + Ichimoku + Fibonacci
+
+Dataset: supplied 14-symbol 15m crypto data.
+Fibonacci: 50-bar completed dealing range; 50%-78.6% preferred zone; 61.8%-78.6% OTE.
+Trades: 97
+Wins: 30
+Losses: 67
+Win rate: 30.93%
+Net R: -7.00
+Average R: -0.072
+Profit factor: 0.896
+Max drawdown: 24R
+
+TP progress buckets:
+<=30%: 44
+30-50%: 14
+50-70%: 6
+70-<100%: 3
+TP full: 30
+Initial adverse >=0.25R: 28
+
+Fib zone at signal:
+NONE: 71 trades, -11R
+OTE: 26 trades, +4R
+MID: 0 trades in this dataset
+
+Conclusion: Fibonacci improved the aggregate result from V30's -11R to -7R on the same dataset, but the system remains negative and is not approved for live capital.

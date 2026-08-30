@@ -1,0 +1,23 @@
+ADAUSDT 0
+AVAXUSDT 0
+BNBUSDT 1
+BTCUSDT 1
+DOGEUSDT 3
+DOTUSDT 0
+ETHUSDT 1
+LINKUSDT 1
+NEARUSDT 2
+SOLUSDT 2
+SUIUSDT 0
+TONUSDT 2
+XRPUSDT 0
+ZECUSDT 1
+
+=== V30 RESULT ===
+Trades 14 | Wins 7 | Losses 7 | WinRate 50.00% | NetR 7.00 | AvgR 0.500 | PF 2.000 | MaxDD 2.00R
+<=30% 2
+30-50% 4
+50-70% 0
+70-<100% 1
+TP full 7
+Initial adverse >=0.25R on entry candle 3
