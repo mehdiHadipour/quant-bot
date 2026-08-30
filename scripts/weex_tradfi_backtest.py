@@ -49,7 +49,17 @@ def main():
         summary["win_rate"] = summary["wins"] / summary["trades"]
         summary.to_csv(ROOT / "WEEX_TRADFI_BY_SYMBOL.csv")
     else:
-        REPORT.write_text("NO_APPROVABLE_TRADFI_TRADES\n", encoding="utf-8")
+        # Previously wrote a plain text line ("NO_APPROVABLE_TRADFI_TRADES")
+        # here. pandas.read_csv() in promote_tradfi.py then treated that
+        # single line as a *column header*, so the resulting DataFrame had
+        # no "symbol" column at all and df.groupby("symbol") crashed with
+        # KeyError: 'symbol' — turning the normal, expected "zero trades
+        # this run" case into a hard failure. Writing a properly-headed
+        # empty CSV keeps the file a valid, always-parseable CSV so
+        # promote_tradfi.py just sees zero groups and approves nothing,
+        # instead of crashing.
+        import pandas as pd
+        pd.DataFrame(columns=["symbol", "entry_time", "exit_time", "direction", "r_multiple", "result"]).to_csv(REPORT, index=False)
 
 
 if __name__ == "__main__":
