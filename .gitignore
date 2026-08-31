@@ -1,7 +1,0 @@
-# Runtime secrets and state
-.env
-state/*.tmp
-data/history.csv
-__pycache__/
-.pytest_cache/
-*.pyc
