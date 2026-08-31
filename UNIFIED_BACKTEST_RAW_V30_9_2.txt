@@ -1,0 +1,33 @@
+BNBUSDT_1h.csv 8
+BTCUSDT_1h.csv 0
+ADAUSDT_1h.csv 0
+NEARUSDT_1h.csv 1
+ETHUSDT_1h.csv 4
+AVAXUSDT_1h.csv 0
+TONUSDT_1h.csv 0
+DOTUSDT_1h.csv 0
+DOGEUSDT_1h.csv 0
+LINKUSDT_1h.csv 0
+SOLUSDT_1h.csv 4
+SUIUSDT_1h.csv 0
+ZECUSDT_1h.csv 0
+XRPUSDT_1h.csv 0
+RESULT {"trades": 17, "wins": 4, "losses": 13, "win_rate": 23.529411764705884, "net_r": -4.999999999999979, "avg_r": -0.29411764705882226, "pf": 0.6153846153846166, "max_dd_r": 8.999999999999977}
+BY_SYMBOL
+          count  sum  mean
+symbol                    
+BNBUSDT       8 -8.0  -1.0
+ETHUSDT       4  2.0   0.5
+NEARUSDT      1 -1.0  -1.0
+SOLUSDT       4  2.0   0.5
+BY_DIRECTION
+           count  sum      mean
+direction                      
+BUY           10 -1.0 -0.100000
+SELL           7 -4.0 -0.571429
+BY_SESSION
+                     count  sum  mean
+session                              
+ASIA_EUROPE_OVERLAP      3 -3.0 -1.00
+LONDON                   4 -1.0 -0.25
+LONDON_NY_OVERLAP       10 -1.0 -0.10

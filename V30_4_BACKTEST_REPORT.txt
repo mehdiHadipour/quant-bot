@@ -1,0 +1,58 @@
+Quant Bot V30.4.0 — Root Cause Fix + Asia
+
+Dataset: supplied V30.2 15m historical data
+Ichimoku: 9/26/52
+ATR: 14
+Displacement: 0.85 ATR
+Confluence threshold: 65 (selected from tested 65/70/75/80 on this same dataset)
+Fib: 50-bar lookback, OTE 61.8–78.6%
+Sessions: London 08-17 Europe/London; New York 08-17 America/New_York; Asia 09-18 Asia/Tokyo; DST-aware.
+
+RESULT
+Trades: 99
+Wins: 32
+Losses: 67
+Win rate: 32.32%
+Net: -3.00R
+Average: -0.030R
+Profit Factor: 0.955
+Max Drawdown: 24R
+
+TP PROGRESS
+<=30%: 44
+30-50%: 14
+50-70%: 6
+70-<100%: 3
+TP full: 32
+Initial adverse >=0.25R on entry candle: 28
+
+DIRECTION
+BUY: 1 trade, -1R
+SELL: 98 trades, -2R
+
+SESSION
+London: 35 trades, +7R
+New York: 18 trades, -6R
+London/NY overlap: 46 trades, -4R
+Asia: 0 trades, 0R
+
+TOP/BOTTOM SYMBOLS
+Worst: SUI -3R; ZEC -3R; TON -3R
+Best: ETH +5R; NEAR +3R; BNB +3R; SOL +2R; XRP +2R
+
+ROOT CAUSE
+The 96/1 SELL/BUY imbalance in V30.2 is primarily caused by the hard requirement that 4H and 1D EMA(50/200) biases agree, combined with a strongly bearish 1D regime in the supplied period. Raw sweep/MSS/FVG primitives are broadly symmetric. Removing/softening the daily gate increased trade count and BUYs but worsened net R on this dataset, so those variants were rejected rather than being called an improvement.
+
+V30.4 changes
+- Asia session enabled in live session gate and backtest.
+- Threshold 65 selected from the tested set for this dataset.
+- Session clocks are DST-aware and use local exchange-session conventions.
+- Added root-cause diagnostics and tests for Asia.
+- No artificial BUY/SELL balancing.
+- No synthetic news/order-book/footprint data.
+
+Validation
+- validate_project.py: VALIDATION OK
+- pytest: 10/10 PASS
+- Python compile: PASS
+- Backtest: PASS

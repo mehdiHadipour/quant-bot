@@ -1,0 +1,25 @@
+V30.9.2 UNIFIED BACKTEST
+========================
+Data: all *_1h.csv files shipped in backtest_data
+Signal engine: indicators.analyze_market() (same function used by live bot)
+Research mode: NEWS_ENABLED=0, SMART_CONTEXT_MODE=backtest
+
+RESULT (manual_settings.json default profile)
+Trades: 17
+Wins: 4
+Losses: 13
+Win rate: 23.53%
+Net R: -5.00R
+Average R: -0.294R
+Profit Factor: 0.615
+Max Drawdown: 9.00R
+
+By direction:
+BUY: 10 trades, -1.00R
+SELL: 7 trades, -4.00R
+
+By symbol:
+See UNIFIED_BACKTEST_RAW_V30_9_2.txt for complete symbol/session breakdown.
+
+Interpretation:
+The architecture is internally unified, but this default weighted profile is NOT profitable on this dataset. Do not enable live trading based on this report. Use manual_settings.json for controlled research and optimize only with out-of-sample validation.

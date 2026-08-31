@@ -1,0 +1,346 @@
+{
+  "version": "30.9.7",
+  "profile": "adaptive_regime_full_manual_shared_engine",
+  "parameters": {
+    "MIN_SIGNAL_PROBABILITY": 65.0,
+    "MIN_ADX": 25.0,
+    "ATR_SL_MULTIPLIER": 1.8,
+    "ATR_TP_MULTIPLIER": 3.0,
+    "MIN_REWARD_RISK": 1.5,
+    "FIB_LOOKBACK": 120,
+    "FIB_OTE_LOW": 0.618,
+    "FIB_OTE_HIGH": 0.85,
+    "STRICT_MIN_SCORE": 80.0,
+    "STRICT_MIN_HLI": 70.0,
+    "COUNTERTREND_MIN_SCORE": 82.0,
+    "NEGATIVE_SESSION_MIN_SCORE": 80.0,
+    "NEGATIVE_SESSION_MIN_HLI": 70.0,
+    "REGIME_ENABLED": true,
+    "REGIME_MIN_CONFIDENCE": 0.0,
+    "REGIME_ADX_TREND_MIN": 25.0,
+    "REGIME_ADX_RANGE_MAX": 20.0,
+    "REGIME_ATR_LOOKBACK": 14,
+    "REGIME_EMA_FAST": 50,
+    "REGIME_EMA_SLOW": 200,
+    "REGIME_SLOPE_LOOKBACK": 20,
+    "REGIME_RANGE_BB_WIDTH_MAX": 0.06,
+    "REGIME_TRANSITION_SCORE": 0.55,
+    "SESSION_SCORE_BONUS_LONDON_NY_OVERLAP": 5.0,
+    "SESSION_SCORE_BONUS_ASIA_EUROPE_OVERLAP": 4.0,
+    "SESSION_SCORE_BONUS_LONDON": 3.0,
+    "SESSION_SCORE_BONUS_NEW_YORK": 2.0,
+    "SESSION_SCORE_BONUS_ASIA": 0.0,
+    "SESSION_MIN_SCORE_LONDON_NY_OVERLAP": 65.0,
+    "SESSION_MIN_SCORE_ASIA_EUROPE_OVERLAP": 68.0,
+    "SESSION_MIN_SCORE_LONDON": 65.0,
+    "SESSION_MIN_SCORE_NEW_YORK": 72.0,
+    "SESSION_MIN_SCORE_ASIA": 76.0,
+    "SESSION_LONDON_START": "08:00",
+    "SESSION_LONDON_END": "17:00",
+    "SESSION_NY_START": "08:00",
+    "SESSION_NY_END": "17:00",
+    "SESSION_ASIA_START": "09:00",
+    "SESSION_ASIA_END": "18:00",
+    "SESSION_TIMEZONE_LONDON": "Europe/London",
+    "SESSION_TIMEZONE_NY": "America/New_York",
+    "SESSION_TIMEZONE_ASIA": "Asia/Tokyo",
+    "OFF_SESSION_ALLOWED": true,
+    "WEEKEND_ALLOWED": true,
+    "SESSION_FILTER_ENABLED": true,
+    "REGIME_HARD_GATE": false,
+    "MACD_FAST": 12,
+    "MACD_SLOW": 26,
+    "MACD_SIGNAL": 9,
+    "SWEEP_LOOKBACK": 20,
+    "MSS_LOOKBACK": 8,
+    "PRIOR_SWEEP_BARS": 4,
+    "MID_LOOKBACK": 40,
+    "DISPLACEMENT_MIN": 0.85,
+    "VP_LOOKBACK": 60,
+    "VP_BINS": 40,
+    "MIN_BACKTEST_RR": 1.8,
+    "TP_MIN_R": 2.0,
+    "TP_MAX_R": 4.0,
+    "SWING_SL_ATR_BUFFER": 0.1,
+    "MAX_HOLD_BARS": 97
+  },
+  "gates": {
+    "adx": true,
+    "low_atr": true,
+    "htf_alignment": true,
+    "fib_ote": false,
+    "short_term_ema": true,
+    "smart_context": true,
+    "strict_symbol": true,
+    "negative_session": true,
+    "countertrend": true,
+    "strict_macd": true
+  },
+  "tools": {
+    "trend": {
+      "enabled": true,
+      "mode": "score",
+      "weight": 10
+    },
+    "structure": {
+      "enabled": true,
+      "mode": "score",
+      "weight": 12
+    },
+    "liquidity_sweep": {
+      "enabled": true,
+      "mode": "score",
+      "weight": 14
+    },
+    "fvg": {
+      "enabled": true,
+      "mode": "score",
+      "weight": 10
+    },
+    "fibonacci": {
+      "enabled": true,
+      "mode": "score",
+      "weight": 13
+    },
+    "ichimoku": {
+      "enabled": true,
+      "mode": "score",
+      "weight": 6
+    },
+    "macd": {
+      "enabled": true,
+      "mode": "score",
+      "weight": 7
+    },
+    "order_flow": {
+      "enabled": true,
+      "mode": "score",
+      "weight": 6
+    },
+    "vwap": {
+      "enabled": true,
+      "mode": "score",
+      "weight": 4
+    },
+    "stochastic": {
+      "enabled": true,
+      "mode": "score",
+      "weight": 3
+    },
+    "volume": {
+      "enabled": true,
+      "mode": "score",
+      "weight": 4
+    },
+    "bollinger": {
+      "enabled": true,
+      "mode": "score",
+      "weight": 3
+    },
+    "risk_quality": {
+      "enabled": true,
+      "mode": "score",
+      "weight": 3
+    },
+    "wick": {
+      "enabled": true,
+      "mode": "score",
+      "weight": 3
+    },
+    "funding": {
+      "enabled": true,
+      "mode": "score",
+      "weight": 2
+    }
+  },
+  "sessions": {
+    "enabled": true,
+    "off_session_allowed": true,
+    "weekend_allowed": true,
+    "ASIA": {
+      "enabled": true,
+      "start": "09:00",
+      "end": "18:00",
+      "weight": 0.72,
+      "score_bonus": 0,
+      "min_score": 65
+    },
+    "LONDON": {
+      "enabled": true,
+      "start": "08:00",
+      "end": "17:00",
+      "weight": 0.88,
+      "score_bonus": 3,
+      "min_score": 65
+    },
+    "NEW_YORK": {
+      "enabled": true,
+      "start": "08:00",
+      "end": "17:00",
+      "weight": 0.92,
+      "score_bonus": 2,
+      "min_score": 65
+    },
+    "ASIA_EUROPE_OVERLAP": {
+      "enabled": true,
+      "weight": 0.86,
+      "score_bonus": 4,
+      "min_score": 68
+    },
+    "LONDON_NY_OVERLAP": {
+      "enabled": true,
+      "weight": 1.0,
+      "score_bonus": 5,
+      "min_score": 65
+    },
+    "NEGATIVE_SESSIONS": [
+      "ASIA",
+      "NEW_YORK"
+    ],
+    "negative_sessions": [
+      "ASIA",
+      "NEW_YORK"
+    ]
+  },
+  "risk": {
+    "RISK_PERCENT_PER_TRADE": 1.0,
+    "MAX_CONCURRENT_TRADES": 4,
+    "MAX_DAILY_LOSS_R": 3.0,
+    "MAX_OPEN_RISK_R": 4.0
+  },
+  "regime": {
+    "enabled": true,
+    "min_confidence": 0.0,
+    "trend_adx_min": 25.0,
+    "range_adx_max": 20.0,
+    "ema_fast": 50,
+    "ema_slow": 200,
+    "slope_lookback": 20,
+    "atr_lookback": 14,
+    "range_bb_width_max": 0.06,
+    "allow_unknown": true,
+    "allow_transition": true,
+    "strategy_by_regime": {
+      "BULL": [
+        "trend",
+        "breakout",
+        "liquidity"
+      ],
+      "BEAR": [
+        "trend",
+        "breakout",
+        "liquidity"
+      ],
+      "RANGE": [
+        "sweep",
+        "mean_reversion"
+      ],
+      "TRANSITION": [
+        "liquidity",
+        "reversal"
+      ]
+    },
+    "hard_gate": false
+  },
+  "symbol_profiles": {
+    "BTCUSDT": {
+      "enabled": true,
+      "regime_overrides": {},
+      "weights_overrides": {},
+      "parameter_overrides": {}
+    },
+    "ETHUSDT": {
+      "enabled": true,
+      "regime_overrides": {},
+      "weights_overrides": {},
+      "parameter_overrides": {}
+    },
+    "BNBUSDT": {
+      "enabled": true,
+      "regime_overrides": {},
+      "weights_overrides": {},
+      "parameter_overrides": {}
+    },
+    "SOLUSDT": {
+      "enabled": true,
+      "regime_overrides": {},
+      "weights_overrides": {},
+      "parameter_overrides": {}
+    },
+    "XRPUSDT": {
+      "enabled": true,
+      "regime_overrides": {},
+      "weights_overrides": {},
+      "parameter_overrides": {}
+    },
+    "ADAUSDT": {
+      "enabled": true,
+      "regime_overrides": {},
+      "weights_overrides": {},
+      "parameter_overrides": {}
+    },
+    "DOGEUSDT": {
+      "enabled": true,
+      "regime_overrides": {},
+      "weights_overrides": {},
+      "parameter_overrides": {}
+    },
+    "AVAXUSDT": {
+      "enabled": true,
+      "regime_overrides": {},
+      "weights_overrides": {},
+      "parameter_overrides": {}
+    },
+    "LINKUSDT": {
+      "enabled": true,
+      "regime_overrides": {},
+      "weights_overrides": {},
+      "parameter_overrides": {}
+    },
+    "DOTUSDT": {
+      "enabled": true,
+      "regime_overrides": {},
+      "weights_overrides": {},
+      "parameter_overrides": {}
+    },
+    "ZECUSDT": {
+      "enabled": true,
+      "regime_overrides": {},
+      "weights_overrides": {},
+      "parameter_overrides": {}
+    },
+    "SUIUSDT": {
+      "enabled": true,
+      "regime_overrides": {},
+      "weights_overrides": {},
+      "parameter_overrides": {}
+    },
+    "TONUSDT": {
+      "enabled": true,
+      "regime_overrides": {},
+      "weights_overrides": {},
+      "parameter_overrides": {}
+    },
+    "NEARUSDT": {
+      "enabled": true,
+      "regime_overrides": {},
+      "weights_overrides": {},
+      "parameter_overrides": {}
+    }
+  },
+  "research": {
+    "walk_forward": {
+      "enabled": true,
+      "train_bars": 2000,
+      "test_bars": 500,
+      "step_bars": 500
+    },
+    "min_trades_for_promotion": 30,
+    "min_profit_factor": 1.25,
+    "max_drawdown_r": 8.0,
+    "min_expectancy_r": 0.05,
+    "include_fees": true,
+    "fee_r_per_side": 0.0,
+    "slippage_r_per_side": 0.0
+  }
+}
