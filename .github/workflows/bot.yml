@@ -1,0 +1,72 @@
+name: Quant Bot - Smart Context Cycle
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '4-59/10 * * * *'
+permissions:
+  contents: write
+concurrency:
+  group: quant-bot-cycle
+  cancel-in-progress: false
+jobs:
+  trading_bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip check
+      - name: Validate project
+        run: python scripts/validate_project.py
+      - name: Compile Python
+        run: python -m compileall -q .
+      - name: Unit tests
+        run: python -m unittest discover -s tests -p 'test_*.py'
+      - name: Run bot
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT: ${{ secrets.TELEGRAM_CHAT }}
+          ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
+          SYMBOLS: ${{ vars.SYMBOLS }}
+          BUY_ONLY_SYMBOLS: ${{ vars.BUY_ONLY_SYMBOLS }}
+          SELL_ONLY_SYMBOLS: ${{ vars.SELL_ONLY_SYMBOLS }}
+          WHALE_BIAS_JSON: ${{ vars.WHALE_BIAS_JSON }}
+          FUNDAMENTAL_JSON: ${{ vars.FUNDAMENTAL_JSON }}
+          TRADFI_ENABLED: ${{ vars.TRADFI_ENABLED }}
+          TRADFI_LIVE_APPROVAL_REQUIRED: ${{ vars.TRADFI_LIVE_APPROVAL_REQUIRED }}
+          TRADFI_APPROVED_SYMBOLS: ${{ vars.TRADFI_APPROVED_SYMBOLS }}
+          TRADFI_APPROVAL_FILE: ${{ vars.TRADFI_APPROVAL_FILE }}
+          TRADFI_BACKTEST_DAYS: ${{ vars.TRADFI_BACKTEST_DAYS }}
+        run: python main.py
+      - name: Persist encrypted runtime state
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # One-time: stop tracking the legacy plaintext history file (now
+          # replaced by data/history.csv.enc). If it's still tracked from
+          # before v27.3, main.py deletes it on disk during migration but
+          # a plain `git add` of specific globs never stages *deletions*,
+          # which left it as an unstaged tracked-file change and made
+          # every subsequent `git pull --rebase` below fail with
+          # "You have unstaged changes." This removes it from the index
+          # (no-op once it's already gone).
+          git rm -r --cached --ignore-unmatch data/history.csv >/dev/null 2>&1 || true
+          # -A (not just specific extensions) so any file that gets
+          # modified, added, OR deleted under state/ or data/ is staged -
+          # a plain glob like state/*.enc only ever stages additions and
+          # modifications, never a removal of an already-tracked file.
+          git add -A -f state/ data/
+          git diff --cached --quiet || git commit -m "Persist Quant Bot encrypted runtime state"
+          # --autostash: safety net so any *other* future unstaged
+          # change in the working tree can never hard-fail this step the
+          # same way again.
+          git pull --rebase --autostash origin main
+          git push

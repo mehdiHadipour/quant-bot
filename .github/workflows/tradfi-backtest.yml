@@ -1,0 +1,44 @@
+name: Quant Bot - WEEX TradFi Research Backtest
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: Historical days to request from WEEX
+        required: false
+        default: "90"
+permissions:
+  contents: write
+jobs:
+  tradfi_research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip check
+      - name: Validate
+        run: python scripts/validate_project.py
+      - name: Compile
+        run: python -m compileall -q .
+      - name: Unit tests
+        run: python -m unittest discover -s tests -p 'test_*.py'
+      - name: Download WEEX TradFi history and backtest
+        env:
+          TRADFI_BACKTEST_DAYS: ${{ inputs.days }}
+        run: python scripts/weex_tradfi_backtest.py
+      - name: Promote only passing OOS symbols/directions
+        run: python scripts/promote_tradfi.py
+      - name: Commit research report (if changed)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add WEEX_TRADFI_BACKTEST_RESULTS.csv WEEX_TRADFI_BY_SYMBOL.csv state/tradfi_approval.json backtest_data/weex_tradfi 2>/dev/null || true
+          git diff --cached --quiet || git commit -m "Research WEEX TradFi symbols and update approval policy"
+          git push || true

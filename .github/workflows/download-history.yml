@@ -1,0 +1,71 @@
+name: Quant Bot - Download Long-Horizon Backtest Data
+on:
+  workflow_dispatch:
+    inputs:
+      years:
+        description: 'How many years of history to fetch (ignored if start_date is set)'
+        required: false
+        default: '2'
+      start_date:
+        description: 'Optional start date YYYY-MM-DD (UTC). Overrides years.'
+        required: false
+        default: ''
+      symbols:
+        description: 'Comma-separated symbols (blank = the bot default 14)'
+        required: false
+        default: ''
+      interval:
+        description: 'Kline interval to fetch'
+        required: false
+        default: '15m'
+permissions:
+  contents: write
+jobs:
+  download_history:
+    runs-on: ubuntu-latest
+    # 2 years x 14 symbols x 15m is roughly 1,000 paginated requests -
+    # this can genuinely take a while, well beyond the 8-min budget the
+    # scheduled bot.yml job uses, so this gets its own generous timeout.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip check
+      - name: Download history
+        run: |
+          ARGS="--interval ${{ github.event.inputs.interval }}"
+          if [ -n "${{ github.event.inputs.start_date }}" ]; then
+            ARGS="$ARGS --start ${{ github.event.inputs.start_date }}"
+          else
+            ARGS="$ARGS --years ${{ github.event.inputs.years }}"
+          fi
+          if [ -n "${{ github.event.inputs.symbols }}" ]; then
+            ARGS="$ARGS --symbols ${{ github.event.inputs.symbols }}"
+          fi
+          python scripts/download_history.py $ARGS
+      - name: Run backtest against the new data
+        run: python scripts/run_backtest.py | tee /tmp/backtest.log
+      - name: Upload backtest results as an artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: backtest-results
+          path: |
+            BACKTEST_V30_RESULTS.csv
+            V30_BY_SYMBOL.csv
+            /tmp/backtest.log
+          if-no-files-found: warn
+      - name: Commit and push the downloaded data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A -f backtest_data/
+          git diff --cached --quiet || git commit -m "Download long-horizon backtest data (${{ github.event.inputs.years }}y, ${{ github.event.inputs.interval }})"
+          git pull --rebase --autostash origin main
+          git push
